@@ -286,6 +286,28 @@ extension EditorSession {
         isMaskSelected = false
         endEdit()
     }
+    /// Whether an Option-drag can drop a copy of `source`'s mask on `target`.
+    func canCopyMask(from source: UUID, to target: UUID) -> Bool {
+        guard canEditLayers, source != target, let layers = document?.layers,
+              layers.first(where: { $0.id == source })?.mask != nil,
+              let layer = layers.first(where: { $0.id == target }) else { return false }
+        return !layer.isGroup
+    }
+    /// Option-dragging a mask thumbnail onto another layer: a copy of the mask, sitting where it sits on the
+    /// document, replacing any mask the layer had.
+    func copyMask(from source: UUID, to target: UUID) {
+        guard canCopyMask(from: source, to: target), let layers = document?.layers,
+              let from = layers.first(where: { $0.id == source }), var mask = from.mask,
+              let index = layers.firstIndex(where: { $0.id == target }) else { return }
+        commitTransform()
+        finishOpacityEdit()
+        mask.placement = from.maskTransform
+        beginEdit(layers[index].mask == nil ? "Copy Layer Mask" : "Replace Layer Mask")
+        document?.layers[index].mask = mask
+        selectLayer(target)
+        isMaskSelected = true
+        endEdit()
+    }
     /// The link between a layer and its mask: linked they move together; unlinked each transforms on its own.
     func toggleMaskLink(_ id: UUID) {
         guard canEditLayers, let index = document?.layers.firstIndex(where: { $0.id == id }),

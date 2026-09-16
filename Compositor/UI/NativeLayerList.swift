@@ -25,7 +25,7 @@ struct NativeLayerList: NSViewRepresentable {
         table.target = context.coordinator
         table.doubleAction = #selector(Coordinator.renameClickedLayer(_:))
         table.action = #selector(Coordinator.clickedLayer(_:))
-        table.registerForDraggedTypes([Coordinator.layerType])
+        table.registerForDraggedTypes([Coordinator.layerType, Coordinator.maskType])
         table.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
         table.setDraggingSourceOperationMask([], forLocal: false)
         table.setAccessibilityIdentifier("layersList")
@@ -43,6 +43,8 @@ struct NativeLayerList: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         static let layerType = NSPasteboard.PasteboardType("com.compositor.layer-row")
+        /// An Option-drag from a mask thumbnail: the id of the layer whose mask is being copied.
+        static let maskType = NSPasteboard.PasteboardType("com.compositor.layer-mask")
         let session: EditorSession
         private var rows: [ImageLayer] = []
         private var rowDetails: [UUID: LayerHierarchy.Entry] = [:]
@@ -135,6 +137,13 @@ struct NativeLayerList: NSViewRepresentable {
         }
         func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo,
                        proposedRow row: Int, proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
+            if let source = draggedMask(info) {
+                // A mask lands on whichever row is under the pointer.
+                let target = tableView.row(at: tableView.convert(info.draggingLocation, from: nil))
+                guard rows.indices.contains(target), session.canCopyMask(from: source, to: rows[target].id) else { return [] }
+                tableView.setDropRow(target, dropOperation: .on)
+                return .copy
+            }
             guard session.canEditLayers, info.draggingSource as? NSTableView === tableView,
                   (0...rows.count).contains(row) else { return [] }
             let ids = draggedLayers(info)
@@ -150,6 +159,11 @@ struct NativeLayerList: NSViewRepresentable {
         }
         func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo,
                        row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+            if let source = draggedMask(info) {
+                guard rows.indices.contains(row), session.canCopyMask(from: source, to: rows[row].id) else { return false }
+                session.copyMask(from: source, to: rows[row].id)
+                return true
+            }
             guard info.draggingSource as? NSTableView === tableView else { return false }
             let ids = draggedLayers(info)
             guard !ids.isEmpty else { return false }
@@ -181,6 +195,9 @@ struct NativeLayerList: NSViewRepresentable {
             if placed, !copying { session.selectLayers(Set(ids), primary: ids.first) }
             session.endEdit()
             return placed
+        }
+        private func draggedMask(_ info: NSDraggingInfo) -> UUID? {
+            info.draggingPasteboard.string(forType: Self.maskType).flatMap(UUID.init(uuidString:))
         }
         /// Every layer being dragged, in the order the list shows them: a row's pasteboard item each, leaving out
         /// anything inside a dragged folder, which the folder brings along itself.
@@ -242,8 +259,8 @@ final class LayerTableView: NSTableView {
             }
         }
     }
-    /// Keeps the cursor right over the layer list: with Option held, the clipping cursor over a thumbnail
-    /// and the duplicate cursor over the rest of a row; a thumbnail's own cursor with Command held over
+    /// Keeps the cursor right over the layer list: with Option held, the clipping cursor over the bottom quarter
+    /// of a row, as in Photoshop, and the duplicate cursor over the rest of it (a mask thumbnail copies the mask); a thumbnail's own cursor with Command held over
     /// it; otherwise the arrow — even when a
     /// tool's cursor followed the mouse in. `location` is in window coordinates; without one
     /// (a modifier change) the current mouse position is used.
@@ -261,14 +278,24 @@ final class LayerTableView: NSTableView {
         let index = row(at: point)
         guard let session, session.layerRows.indices.contains(index) else { NSCursor.arrow.set(); return }
         let layer = session.layerRows[index].layer
-        // Over a thumbnail, Option makes or releases a clipping mask; over the rest of the row an
-        // Option-drag drops a duplicate of the layer.
-        guard thumbnail(at: point) != nil else {
+        if let thumbnail = thumbnail(at: point), thumbnail.isMaskTarget, !thumbnail.isHidden {
+            (session.canEditLayers ? CanvasView.duplicateCursor : NSCursor.arrow).set()
+            return
+        }
+        // Over the bottom of a row Option makes or releases a clipping mask; over the rest of it an Option-drag
+        // drops a duplicate of the layer.
+        guard isClippingZone(point, row: index) else {
             (session.canEditLayers && layer.isGroup != true ? CanvasView.duplicateCursor : NSCursor.arrow).set()
             return
         }
         guard session.canToggleClippingMask(layer.id) else { NSCursor.arrow.set(); return }
         (layer.maskSourceID == nil ? Self.createClippingCursor : Self.releaseClippingCursor).set()
+    }
+    /// The bottom quarter of a row, where Option-click clips the layer to the one below.
+    private func isClippingZone(_ point: NSPoint, row: Int) -> Bool {
+        guard row >= 0 else { return false }
+        let rect = rect(ofRow: row)
+        return point.y >= rect.maxY - rect.height / 4
     }
     /// Command held over a thumbnail that loads a selection: that thumbnail shows its cursor.
     private func thumbnailOwnsCursor(at point: NSPoint, flags: NSEvent.ModifierFlags) -> Bool {
@@ -295,9 +322,10 @@ final class LayerTableView: NSTableView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let row = row(at: point)
-        // Option-click on a thumbnail makes or releases a clipping mask. Elsewhere on the row the click
+        // Option-click on the bottom of a row makes or releases a clipping mask. Elsewhere on the row the click
         // selects as usual, so an Option-drag can drop a duplicate.
-        if event.modifierFlags.contains(.option), !event.modifierFlags.contains(.command), thumbnail(at: point) != nil,
+        if event.modifierFlags.contains(.option), !event.modifierFlags.contains(.command), isClippingZone(point, row: row),
+           thumbnail(at: point)?.isMaskTarget != true,
            let entries = session?.layerRows, entries.indices.contains(row) {
             session?.toggleClippingMask(entries[row].layer.id)
             refreshClippingCursor(event.modifierFlags)
@@ -421,6 +449,14 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
+        // A faint hairline along the bottom of each row marks where one layer ends and the next begins.
+        let edge = RowEdgeLine()
+        edge.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(edge)
+        NSLayoutConstraint.activate([
+            edge.leadingAnchor.constraint(equalTo: leadingAnchor), edge.trailingAnchor.constraint(equalTo: trailingAnchor),
+            edge.bottomAnchor.constraint(equalTo: bottomAnchor), edge.heightAnchor.constraint(equalToConstant: 1),
+        ])
         indentation = disclosure.leadingAnchor.constraint(equalTo: eye.trailingAnchor, constant: 0)
         addLayoutGuide(thumbnailSlot)
         addLayoutGuide(maskSlot)
@@ -505,6 +541,7 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
         }
         layerID = layer.id
         maskThumbnail.isHidden = layer.mask == nil
+        maskThumbnail.layerID = layer.id
         maskWidth.constant = layer.mask == nil ? 0 : 30
         disabledMaskMark.isHidden = layer.mask?.isEnabled != false
         thumbnail.isEnabled = !session.showsBusy && !session.isImporting
@@ -530,7 +567,7 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
         if let source = layer.maskSourceID {
             let sourceName = session.document?.layers.first(where: { $0.id == source })?.name ?? "Missing source"
             dimensions.stringValue = "Clipped to \(sourceName)"
-            dimensions.toolTip = "Clipping mask based on \(sourceName). Option-click its thumbnail to release."
+            dimensions.toolTip = "Clipping mask based on \(sourceName). Option-click the bottom of its row to release."
         } else { dimensions.toolTip = nil }
         eye.image = NSImage(systemSymbolName: layer.isVisible ? "eye" : "eye.slash", accessibilityDescription: nil)
         eye.setAccessibilityLabel("\(layer.isVisible ? "Hide" : "Show") \(layer.name)")
@@ -543,7 +580,7 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
            let sourceID = layer.maskSourceID,
            let source = session?.document?.layers.first(where: { $0.id == sourceID }) {
             dimensions.stringValue = "Clipped to \(source.name)"
-            dimensions.toolTip = "Clipping mask based on \(source.name). Option-click its thumbnail to release."
+            dimensions.toolTip = "Clipping mask based on \(source.name). Option-click the bottom of its row to release."
         }
         let active = session?.activeLayerID == layerID && session?.selectedLayerIDs.count == 1
         let mask = session?.isMaskSelected == true
@@ -684,7 +721,9 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
 }
 
 /// Select on mouse-down, then let the table retain native drag and multiselect tracking.
-private final class LayerThumbnailButton: NSButton {
+private final class LayerThumbnailButton: NSButton, NSDraggingSource {
+    /// The row's layer, for a mask thumbnail's Option-drag.
+    var layerID: UUID?
     var isMaskTarget = false { didSet { updateTrackingAreas() } }
     /// Image thumbnails also load a selection on Cmd-click (masks always do).
     var loadsSelection = false { didSet { updateTrackingAreas() } }
@@ -748,6 +787,7 @@ private final class LayerThumbnailButton: NSButton {
         while ancestor != nil && !(ancestor is NSTableView) { ancestor = ancestor?.superview }
         guard let table = ancestor as? NSTableView else { super.mouseDown(with: event); return }
         if event.modifierFlags.contains(.option), !event.modifierFlags.contains(.command) {
+            if isMaskTarget, !isHidden { dragMaskCopy(event); return }
             table.mouseDown(with: event)
             return
         }
@@ -765,6 +805,41 @@ private final class LayerThumbnailButton: NSButton {
     }
 }
 
+extension LayerThumbnailButton {
+    /// Option-drag from a mask thumbnail carries a copy of the mask to another row; a click without a drag just
+    /// selects the mask.
+    fileprivate func dragMaskCopy(_ down: NSEvent) {
+        guard let window, let layerID else { return }
+        while let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if event.type == .leftMouseUp { sendAction(action, to: target); return }
+            let dx = event.locationInWindow.x - down.locationInWindow.x, dy = event.locationInWindow.y - down.locationInWindow.y
+            guard dx * dx + dy * dy >= 9 else { continue }
+            let item = NSPasteboardItem()
+            item.setString(layerID.uuidString, forType: NativeLayerList.Coordinator.maskType)
+            let dragging = NSDraggingItem(pasteboardWriter: item)
+            let snapshot = NSImage(size: bounds.size)
+            if let rep = bitmapImageRepForCachingDisplay(in: bounds) {
+                cacheDisplay(in: bounds, to: rep)
+                snapshot.addRepresentation(rep)
+            }
+            dragging.setDraggingFrame(bounds, contents: snapshot)
+            beginDraggingSession(with: [dragging], event: down, source: self)
+            return
+        }
+    }
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .copy : []
+    }
+}
+/// One device pixel of faint white, ignored by clicks.
+private final class RowEdgeLine: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let scale = window?.backingScaleFactor ?? 2
+        NSColor.white.withAlphaComponent(0.06).setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1 / scale).fill()
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
 private final class MaskDisabledMark: NSTextField {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
