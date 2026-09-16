@@ -3,13 +3,13 @@
   <channel>
     <title>Compositor</title>
     <item>
-      <title>Version 1.0</title>
-      <pubDate>Wed, 16 Sep 2026 21:57:35 +0000</pubDate>
-      <sparkle:version>1</sparkle:version>
-      <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+      <title>Version 1.0.1</title>
+      <pubDate>Wed, 16 Sep 2026 22:14:35 +0000</pubDate>
+      <sparkle:version>2</sparkle:version>
+      <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
-      <link>https://github.com/RobbieOnGithub/Compositor/releases/tag/v1.0</link>
-      <enclosure url="https://github.com/RobbieOnGithub/Compositor/releases/download/v1.0/Compositor.dmg" sparkle:edSignature="+qZwtm3wRfMjWSinpCsFtaHkcK+AVn5RoJTAistQhjQ0V8gAzfKQ3QDqyy3BYHAu3ZXxHj5E2blCPD7dlwk4Cg==" length="7244212" type="application/octet-stream"/>
+      <link>https://github.com/RobbieOnGithub/Compositor/releases/tag/v1.0.1</link>
+      <enclosure url="https://github.com/RobbieOnGithub/Compositor/releases/download/v1.0.1/Compositor.dmg" sparkle:edSignature="34/acAHn1XmB47rrc8x0TA712Uj6rQitcCEHhy7qVr/JQKuyfaccprbW803czg8Y8fD6kCXIe2vaR1JbkZXzAA==" length="7255348" type="application/octet-stream"/>
     </item>
   </channel>
 </rss>
