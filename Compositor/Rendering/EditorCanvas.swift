@@ -69,6 +69,9 @@ final class CanvasView: NSView {
     private var marqueeConstrainArmed = true
     /// The Marquee draft's latest drag point, so a Shift change can reshape it without a mouse move.
     private var marqueeDragPixel: CGPoint?
+    /// While a Marquee is dragged against or past the canvas edge, pans the view toward the pointer.
+    private var marqueeAutoscroll: Timer?
+    private var marqueeAutoscrollPoint: CGPoint?
     /// Arrow with scissors: Cmd-dragging here cuts and moves the selected pixels.
     /// An invisible cursor, for tools that draw their own pointer on the canvas.
     static let hiddenCursor = NSCursor(image: NSImage(size: NSSize(width: 1, height: 1)), hotSpot: .zero)
@@ -1135,9 +1138,9 @@ final class CanvasView: NSView {
             synchronizeDisplay()
             return
         }
-        if let start = selectionDragStart, let document = session.document {
-            let pixel = session.viewport.documentPoint(from: point, documentSize: document.size)
-            session.moveSelection(by: CGSize(width: pixel.x - start.x, height: pixel.y - start.y))
+        if selectionDragStart != nil {
+            dragSelection(to: point, flags: event.modifierFlags)
+            updateMarqueeAutoscroll(at: point)
             Self.moveSelectionCursor.set()
             synchronizeDisplay()
             return
@@ -1147,7 +1150,9 @@ final class CanvasView: NSView {
             switch draft.kind {
             case .freehand: session.extendLasso(to: pixel)
             case .polygonal: session.moveLassoCursor(to: pixel)
-            case .rectangle, .ellipse: dragMarqueeDraft(to: pixel, flags: event.modifierFlags)
+            case .rectangle, .ellipse:
+                dragMarqueeDraft(to: pixel, flags: event.modifierFlags)
+                updateMarqueeAutoscroll(at: point)
             }
             synchronizeDisplay()
             return
@@ -1222,6 +1227,7 @@ final class CanvasView: NSView {
         lastDragPoint = point
     }
     override func mouseUp(with event: NSEvent) {
+        stopMarqueeAutoscroll()
         session.snapGuides = ([], [])
         if samplingColor {
             samplingColor = false
@@ -1429,6 +1435,56 @@ final class CanvasView: NSView {
         spaceHeld = false
         lastDragPoint = nil
         return super.resignFirstResponder()
+    }
+
+    /// How far, in points per frame, the view pans toward a pointer at `point`: nothing well inside the canvas,
+    /// speeding up from the last few points before the edge to however far past it the pointer has gone.
+    private func marqueeAutoscrollDelta(at point: CGPoint) -> CGSize {
+        let rect = visibleRect, margin: CGFloat = 12
+        func speed(_ past: CGFloat) -> CGFloat { past <= 0 ? 0 : min(40, 2 + past * 0.4) }
+        let left = speed(rect.minX + margin - point.x), right = speed(point.x - (rect.maxX - margin))
+        let top = speed(rect.minY + margin - point.y), bottom = speed(point.y - (rect.maxY - margin))
+        // Pointer past the right edge: the document slides left to bring what's beyond into view.
+        return CGSize(width: left - right, height: top - bottom)
+    }
+    private func updateMarqueeAutoscroll(at point: CGPoint) {
+        marqueeAutoscrollPoint = point
+        guard marqueeAutoscrollDelta(at: point) != .zero else { stopMarqueeAutoscroll(); return }
+        guard marqueeAutoscroll == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stepMarqueeAutoscroll() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        marqueeAutoscroll = timer
+    }
+    private func stepMarqueeAutoscroll() {
+        let marquee = session.lassoDraft.map { $0.kind == .rectangle || $0.kind == .ellipse } == true
+        guard let point = marqueeAutoscrollPoint, let document = session.document,
+              marquee || selectionDragStart != nil else { stopMarqueeAutoscroll(); return }
+        let delta = marqueeAutoscrollDelta(at: point)
+        guard delta != .zero else { stopMarqueeAutoscroll(); return }
+        session.viewport.translate(by: delta)
+        // The pointer hasn't moved, but the document has under it: the box's corner, or the moved selection, follows.
+        if selectionDragStart != nil { dragSelection(to: point, flags: NSEvent.modifierFlags) }
+        else { dragMarqueeDraft(to: session.viewport.documentPoint(from: point, documentSize: document.size), flags: NSEvent.modifierFlags) }
+        synchronizeDisplay()
+    }
+    /// Moves a dragged selection so the pixel grabbed sits under `point`. Shift keeps the move on one axis:
+    /// whichever way the drag has gone further.
+    private func dragSelection(to point: CGPoint, flags: NSEvent.ModifierFlags) {
+        guard let start = selectionDragStart, let document = session.document else { return }
+        let pixel = session.viewport.documentPoint(from: point, documentSize: document.size)
+        var offset = CGSize(width: pixel.x - start.x, height: pixel.y - start.y)
+        if flags.contains(.shift) {
+            if abs(offset.width) >= abs(offset.height) { offset.height = 0 } else { offset.width = 0 }
+        }
+        session.moveSelection(by: offset)
+    }
+    private func stopMarqueeAutoscroll() {
+        marqueeAutoscroll?.invalidate()
+        marqueeAutoscroll = nil
+        marqueeAutoscrollPoint = nil
     }
 
     /// Reshapes the Marquee draft. Option subtracts (chosen at the press), so it never draws from the
