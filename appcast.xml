@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Compositor</title>
+    <item>
+      <title>Version 1.0</title>
+      <pubDate>Wed, 16 Sep 2026 21:33:56 +0000</pubDate>
+      <sparkle:version>1</sparkle:version>
+      <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+      <link>https://github.com/RobbieOnGithub/Compositor/releases/tag/v1.0</link>
+      <enclosure url="https://github.com/RobbieOnGithub/Compositor/releases/download/v1.0/Compositor.dmg" sparkle:edSignature="/efe9v6rHZum9smBvtgjjI/p7XhV9BZVQFZluLiAscbiuHA9E6gHLmliowbvHH9QZ6OJrwAerjtvllVjUiTrDg==" length="7242759" type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
