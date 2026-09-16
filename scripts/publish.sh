@@ -8,7 +8,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP=Compositor
-REPO=RobbieOnGithub/Compositor
+REPO=robbietilton/Compositor
 WORK="$HOME/Library/Caches/CompositorRelease"
 SIGN_UPDATE="$WORK/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
 

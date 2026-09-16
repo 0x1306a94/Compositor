@@ -31,7 +31,7 @@
     <!-- Sparkle updates: where the feed lives (permanent), the key updates are signed with, and the helper a
          sandboxed app installs them through. -->
     <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/RobbieOnGithub/Compositor/main/appcast.xml</string>
+    <string>https://raw.githubusercontent.com/robbietilton/Compositor/main/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>KZvD724t8QpzTR4OGrHrsCWt538TJ/g/qrTZii+o214=</string>
     <key>SUEnableInstallerLauncherService</key>
