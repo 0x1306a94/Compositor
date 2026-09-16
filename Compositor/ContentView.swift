@@ -131,7 +131,7 @@ struct ContentView: View {
                         // As wide as the toolbar allows: the window less the traffic lights and New button before it
                         // and the zoom controls after it. Bounded, so adding tabs never pushes those aside; the
                         // strip scrolls instead.
-                        .frame(width: max(200, windowWidth - 324), height: 34, alignment: .center)
+                        .frame(width: max(200, windowWidth - 352), height: 34, alignment: .center)
                 }
                 .sharedBackgroundVisibility(.hidden)
             }

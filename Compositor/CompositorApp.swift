@@ -5,8 +5,6 @@ import Sparkle
 struct CompositorApp: App {
     @NSApplicationDelegateAdaptor(CompositorApplicationDelegate.self) private var applicationDelegate
     private var session: EditorSession { applicationDelegate.session }
-    /// Checks the update feed in the background and installs new versions (Sparkle).
-    private let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     var body: some Scene {
         Window("Compositor", id: "editor") {
             ProjectWorkspaceView(applicationDelegate: applicationDelegate).roundedControls()
@@ -80,7 +78,7 @@ struct CompositorApp: App {
                 // Grouped: a commands builder takes at most ten items.
                 Group {
                     CommandGroup(after: .appInfo) {
-                        Button("Check for Updates…") { updater.checkForUpdates(nil) }
+                        Button("Check for Updates…") { applicationDelegate.updater.checkForUpdates(nil) }
                     }
                     CommandGroup(after: .toolbar) {
                         Button("Fit Canvas") { session.fit() }.keyboardShortcut("0").disabled(session.document == nil)
