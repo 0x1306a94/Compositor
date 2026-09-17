@@ -10,17 +10,20 @@ final class BrushCursorOverlay: NSView {
     /// One click's coverage (white with alpha), which shapes the preview's edge to the brush hardness.
     private var tip: CGImage?
     private static let markerReach: CGFloat = 7
+    /// While hardness is being dragged: the fraction of the radius painted at full strength, shown as an inner ring.
+    private var hardness: CGFloat?
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     func update(point: CGPoint?, diameter: CGFloat, sample: CGPoint? = nil, preview: CGImage? = nil,
-                previewOpacity: CGFloat = 1, tip: CGImage? = nil) {
+                previewOpacity: CGFloat = 1, tip: CGImage? = nil, hardness: CGFloat? = nil) {
         let next = point.map { CGRect(x: $0.x - diameter / 2, y: $0.y - diameter / 2, width: diameter, height: diameter) }
-        if circle != next || self.preview !== preview || self.previewOpacity != previewOpacity || self.tip !== tip {
+        if circle != next || self.preview !== preview || self.previewOpacity != previewOpacity || self.tip !== tip || self.hardness != hardness {
             if let circle { setNeedsDisplay(circle.insetBy(dx: -3, dy: -3)) }
             circle = next
             self.preview = preview
             self.previewOpacity = previewOpacity
             self.tip = tip
+            self.hardness = hardness
             if let next { setNeedsDisplay(next.insetBy(dx: -3, dy: -3)) }
         }
         if marker != sample {
@@ -59,6 +62,18 @@ final class BrushCursorOverlay: NSView {
             context.setStrokeColor(NSColor.black.cgColor)
             context.setLineWidth(1)
             context.strokeEllipse(in: circle)
+            if let hardness, hardness > 0 {
+                let inset = circle.width * (1 - hardness) / 2
+                let inner = circle.insetBy(dx: inset, dy: inset)
+                context.setLineDash(phase: 0, lengths: [4, 3])
+                context.setStrokeColor(NSColor.white.cgColor)
+                context.setLineWidth(2.5)
+                context.strokeEllipse(in: inner)
+                context.setStrokeColor(NSColor.black.cgColor)
+                context.setLineWidth(1)
+                context.strokeEllipse(in: inner)
+                context.setLineDash(phase: 0, lengths: [])
+            }
         }
         if let marker {
             let reach = Self.markerReach

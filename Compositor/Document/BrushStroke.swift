@@ -114,6 +114,10 @@ final class BrushStroke {
     var clone: (image: CGImage, offset: CGSize)?
     /// A Blur stroke: `clone` holds the layer blurred, painted in place through the tip.
     var isBlur = false
+    /// The clone sample replaces what's under the tip rather than drawing over it, so it can also clear pixels.
+    var replacesWithClone = false
+    /// The undo name, when the stroke's kind doesn't say it.
+    var editName: String?
     private var allocatedBounds: CGRect?
     private var previous: CGPoint?
     private var samples: [CGPoint] = []
@@ -452,6 +456,7 @@ final class BrushStroke {
                     context.scaleBy(x: 1, y: -1)
                     context.translateBy(x: 0, y: -local.height)
                     context.setAlpha(settings.opacity)
+                    if replacesWithClone { context.setBlendMode(.copy) }
                     context.interpolationQuality = .medium
                     // Into document coordinates, where the sample lives.
                     context.translateBy(x: -tile.rect.minX, y: -tile.rect.minY)

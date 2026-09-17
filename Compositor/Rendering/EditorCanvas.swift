@@ -668,6 +668,14 @@ final class CanvasView: NSView {
                 : session.gradientEdit?.raster.layer.id == layer.id ? session.gradientEdit?.raster
                 : session.pixelMove?.raster.layer.id == layer.id ? session.pixelMove?.raster : nil
             guard layer.asset != nil || stroke != nil else { return }
+            // Smudge or Liquify in progress: the layer as the stroke has reshaped it so far, across the canvas.
+            if let warp = session.warpStroke, warp.layer.id == layer.id, let image = warp.image {
+                let canvas = LayerTransform(origin: .zero, size: document.size)
+                let mask = layer.mask?.clipImage(placement: layer.maskTransform, over: canvas, width: warp.width, height: warp.height, limit: 2048)
+                LayerRenderer.draw(image, transform: canvas, center: center(canvas.center), scale: scale,
+                    opacity: layer.opacity, blendMode: session.displayedBlendMode(for: layer), mask: mask, in: context)
+                return
+            }
             // A pending distortion shows the layer warped into its new shape.
             if stroke == nil, let distorted = session.distortPreview(for: layer) {
                 LayerRenderer.draw(distorted.image, transform: distorted.transform, center: center(distorted.transform.center),
@@ -910,7 +918,8 @@ final class CanvasView: NSView {
         }
         brushCursor.update(point: shows ? brushPointer : nil, diameter: max(1, diameter * session.viewport.pointsPerPixel),
                            sample: sample, preview: preview, previewOpacity: session.brushSettings.opacity,
-                           tip: preview == nil ? nil : cloneTip(diameter: diameter, hardness: session.brushSettings.hardness))
+                           tip: preview == nil ? nil : cloneTip(diameter: diameter, hardness: session.brushSettings.hardness),
+                           hardness: brushTipDrag?.hardnessShown == true ? session.brushSettings.hardness : nil)
     }
 
     private var cloneTipCache: (diameter: CGFloat, hardness: CGFloat, image: CGImage?)?
@@ -1060,6 +1069,41 @@ final class CanvasView: NSView {
         if picks, session.transformAutoSelect || flags.contains(.command), let underPointer { return (underPointer, true) }
         return active.map { ($0.id, false) }
     }
+    /// Right-drag with a brush tool: left and right resize the brush from its size at the press, or with Shift
+    /// change its hardness. The brush circle stays where the press was.
+    private var brushTipDrag: (start: CGPoint, diameter: CGFloat, hardness: CGFloat, hardnessShown: Bool)?
+    override func rightMouseDown(with event: NSEvent) {
+        guard session.tool.isBrushTool, session.brushStroke == nil, session.warpStroke == nil, !spaceHeld else {
+            super.rightMouseDown(with: event); return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        brushTipDrag = (point, session.brushSettings.diameter, session.brushSettings.hardness, event.modifierFlags.contains(.shift))
+        brushPointer = point
+        updateBrushCursor()
+    }
+    override func rightMouseDragged(with event: NSEvent) {
+        guard let drag = brushTipDrag else { super.rightMouseDragged(with: event); return }
+        brushTipDrag?.hardnessShown = event.modifierFlags.contains(.shift)
+        let dx = convert(event.locationInWindow, from: nil).x - drag.start.x
+        if event.modifierFlags.contains(.shift) {
+            // The full range across 200 points.
+            session.brushSettings.hardness = min(1, max(0, drag.hardness + dx / 200))
+            session.brushSettings.diameter = drag.diameter
+        } else {
+            // The circle's edge follows the pointer: each point moved widens the radius by a point on screen.
+            let perPixel = max(0.0001, session.viewport.pointsPerPixel)
+            session.brushSettings.diameter = min(2000, max(1, (drag.diameter + 2 * dx / perPixel).rounded()))
+            session.brushSettings.hardness = drag.hardness
+        }
+        brushPointer = drag.start
+        updateBrushCursor()
+    }
+    override func rightMouseUp(with event: NSEvent) {
+        guard brushTipDrag != nil else { super.rightMouseUp(with: event); return }
+        brushTipDrag = nil
+        brushPointer = convert(event.locationInWindow, from: nil)
+        updateBrushCursor()
+    }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         guard session.document != nil, !session.isProjectBusy, !session.isImporting else { return }
@@ -1178,7 +1222,7 @@ final class CanvasView: NSView {
         }
         brushPointer = point
         updateBrushCursor()
-        if session.brushStroke != nil, !session.isProjectBusy, let document = session.document {
+        if session.brushStroke != nil || session.warpStroke != nil, !session.isProjectBusy, let document = session.document {
             var pixel = session.viewport.documentPoint(from: point, documentSize: document.size)
             // Shift keeps the stroke straight: along the row or column it set out on.
             if event.modifierFlags.contains(.shift), let anchor = brushAxisAnchor {
@@ -1238,7 +1282,7 @@ final class CanvasView: NSView {
             if session.colorPicker != nil { ColorPickerPanelController.refocus() }
             return
         }
-        if session.brushStroke != nil, !session.isProjectBusy {
+        if session.brushStroke != nil || session.warpStroke != nil, !session.isProjectBusy {
             if let document = session.document {
                 session.continueBrush(at: session.viewport.documentPoint(from: convert(event.locationInWindow, from: nil), documentSize: document.size))
             }
@@ -1293,7 +1337,7 @@ final class CanvasView: NSView {
         window?.invalidateCursorRects(for: self)
     }
     override func scrollWheel(with event: NSEvent) {
-        guard transformDrag == nil, cropDrag == nil, session.brushStroke == nil else { return }
+        guard transformDrag == nil, cropDrag == nil, session.brushStroke == nil, session.warpStroke == nil else { return }
         guard session.document != nil else { return }
         if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
             session.zoom(to: session.viewport.zoom * exp(-event.scrollingDeltaY * 0.015),
@@ -1305,7 +1349,7 @@ final class CanvasView: NSView {
         }
     }
     override func magnify(with event: NSEvent) {
-        guard transformDrag == nil, cropDrag == nil, session.brushStroke == nil else { return }
+        guard transformDrag == nil, cropDrag == nil, session.brushStroke == nil, session.warpStroke == nil else { return }
         session.zoom(to: session.viewport.zoom * (1 + event.magnification),
                      anchor: convert(event.locationInWindow, from: nil))
     }
@@ -1322,7 +1366,7 @@ final class CanvasView: NSView {
             }
             if event.keyCode != 49 { super.keyDown(with: event); return }
         }
-        if session.brushStroke != nil {
+        if session.brushStroke != nil || session.warpStroke != nil {
             if event.keyCode == 53 && !session.isProjectBusy { session.cancelBrush(); synchronizeDisplay() }
             return
         }

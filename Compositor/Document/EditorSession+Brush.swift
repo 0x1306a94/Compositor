@@ -27,6 +27,7 @@ extension EditorSession {
     }
     func beginBrush(at point: CGPoint) {
         // Spot Healing and Clone Stamp rework image pixels; they have nothing to do on a mask.
+        if tool == .blur, blurMode != .blur { beginWarp(at: point); return }
         guard tool == .brush || tool == .blur || (tool.isBrushTool && !isMaskSelected), canPaint, let layer = activeLayer, let document else { return }
         var clone: (image: CGImage, offset: CGSize)?
         if tool == .cloneStamp {
@@ -59,6 +60,7 @@ extension EditorSession {
         } catch { cancelBrush(); brushError = error.localizedDescription }
     }
     func continueBrush(at point: CGPoint) {
+        if let warpStroke { warpStroke.append(point); lastBrushPoint?.point = point; brushRevision += 1; return }
         guard let brushStroke else { return }
         do { try brushStroke.append(point); lastBrushPoint?.point = point; brushRevision += 1 }
         catch { cancelBrush(); brushError = error.localizedDescription }
@@ -69,12 +71,18 @@ extension EditorSession {
         return last.point
     }
     func cancelBrush() {
+        warpStroke = nil
         brushStroke = nil
         brushRevision += 1
     }
     /// Called directly by mouse-up, before the next input event can be handled.
     @discardableResult
     func finishBrushImmediately() -> Bool {
+        if warpStroke != nil {
+            guard !isProjectBusy else { return false }
+            finishWarp()
+            return true
+        }
         guard let stroke = brushStroke else { return true }
         guard !isProjectBusy else { return false }
         defer { cancelBrush() }
@@ -90,7 +98,7 @@ extension EditorSession {
 
     /// Install immutable tiles immediately, including the undo entry. The next
     /// stroke and other tools can start without awaiting full-image assembly.
-    private func commitPaintSnapshot(_ stroke: BrushStroke) throws {
+    func commitPaintSnapshot(_ stroke: BrushStroke) throws {
         let result = try stroke.paintSnapshot()
         guard result.transform.isValid,
               let index = document?.layers.firstIndex(where: { $0.id == stroke.layer.id }),
@@ -103,7 +111,7 @@ extension EditorSession {
             mask = original.replacing(ImportedImage(image: try raster.makeImage(), thumbnail: try raster.thumbnail(),
                 name: original.asset.name, raster: raster))
         }
-        beginEdit(stroke.isMask ? "Paint Mask" : stroke.isBlur ? "Blur" : stroke.clone != nil ? "Clone Stamp" : stroke.settings.healing ? "Spot Healing" : "Brush Stroke")
+        beginEdit(stroke.editName ?? (stroke.isMask ? "Paint Mask" : stroke.isBlur ? "Blur" : stroke.clone != nil ? "Clone Stamp" : stroke.settings.healing ? "Spot Healing" : "Brush Stroke"))
         if stroke.isMask {
             document?.layers[index].mask = current.mask.map { $0.replacing(result.asset) } ?? LayerMask(asset: result.asset)
         } else {

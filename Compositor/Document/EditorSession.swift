@@ -87,7 +87,7 @@ enum NavigationTool: String, CaseIterable {
     /// Tools that draw and edit selections, sharing modifiers, moving, and nudging.
     var isSelectionTool: Bool { self == .marquee || self == .lasso || self == .wand }
     var symbol: String { self == .eyedropper ? "eyedropper" : self == .marquee ? "rectangle.dashed" : self == .lasso ? "lasso" : self == .wand ? "wand.and.stars" : self == .brush ? "paintbrush.pointed" : self == .spotHealing ? "bandage" : self == .cloneStamp ? "seal" : self == .blur ? "drop" : self == .gradient ? "square.bottomhalf.filled" : self == .shape ? "square.on.circle" : self == .crop ? "crop" : self == .move ? "arrow.up.left.and.arrow.down.right" : self == .hand ? "hand.draw" : "magnifyingglass" }
-    var label: String { self == .eyedropper ? "Eyedropper (I)" : self == .marquee ? "Marquee (M) · Press M again to switch Rectangle/Ellipse" : self == .lasso ? "Lasso (L) · Press L again to switch Freehand/Polygonal" : self == .wand ? "Magic Wand (W)" : self == .brush ? "Brush (B)" : self == .spotHealing ? "Spot Healing Brush (J)" : self == .cloneStamp ? "Clone Stamp (S) · Option-click sets the source" : self == .blur ? "Blur (R)" : self == .gradient ? "Gradient (G)" : self == .shape ? "Shape (U) · Shift-U switches Rectangle/Ellipse" : self == .crop ? "Crop (C)" : self == .move ? "Move / Transform (V)" : self == .hand ? "Hand (H)" : "Zoom (Z)" }
+    var label: String { self == .eyedropper ? "Eyedropper (I)" : self == .marquee ? "Marquee (M)" : self == .lasso ? "Lasso (L)" : self == .wand ? "Magic Wand (W)" : self == .brush ? "Brush (B)" : self == .spotHealing ? "Spot Healing Brush (J)" : self == .cloneStamp ? "Clone Stamp (S) · Option-click sets the source" : self == .blur ? "Smear (R)" : self == .gradient ? "Gradient (G)" : self == .shape ? "Shape (U) · Shift-U switches Rectangle/Ellipse" : self == .crop ? "Crop (C)" : self == .move ? "Move / Transform (V)" : self == .hand ? "Hand (H)" : "Zoom (Z)" }
 }
 
 @Observable
@@ -136,7 +136,7 @@ final class EditorSession {
     private var fileRequestWaiters: [CheckedContinuation<Void, Never>] = []
     var canStartProjectOperation: Bool {
         _ = showsBusy // Re-evaluate in the UI when a long operation starts or ends.
-        return !isProjectBusy && !isImporting && brushStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && adjustmentEditingID == nil
+        return !isProjectBusy && !isImporting && brushStroke == nil && warpStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && adjustmentEditingID == nil
     }
     func waitForFileRequest() async {
         while !canStartProjectOperation {
@@ -178,13 +178,17 @@ final class EditorSession {
     @ObservationIgnored var transformDuplicate: (copy: UUID, source: UUID)?
     var brushSettings = BrushSettings() { didSet { refreshGradient() } }
     var spotHealingMode: SpotHealingMode = .contentAware
+    var blurMode: BlurToolMode = .liquify
     /// Clone Stamp: the source Option-click set (document pixels), its options, and — once a
     /// stroke has started — the offset from brush to source that aligned strokes keep.
     var cloneSource: CGPoint?
     var cloneSettings = CloneSettings()
     /// The brush tip (size, hardness, opacity) of the side not in use: Clone Stamp keeps its own,
     /// soft by default, while Brush and Spot Healing share theirs.
-    @ObservationIgnored var parkedBrushTip: (diameter: CGFloat, hardness: CGFloat, opacity: CGFloat) = (40, 0, 1)
+    /// The tips of the brush families not in use: Clone Stamp and Smear each keep their own size, hardness and
+    /// opacity (both starting soft); the other brushes share one.
+    @ObservationIgnored var parkedBrushTips: [Int: (diameter: CGFloat, hardness: CGFloat, opacity: CGFloat)] = [1: (40, 0, 1), 2: (40, 0, 1)]
+    private static func tipFamily(_ tool: NavigationTool) -> Int { tool == .cloneStamp ? 1 : tool == .blur ? 2 : 0 }
     @ObservationIgnored var cloneOffset: CGSize?
     var maskPaintWhite = false { didSet { refreshGradient() } }
     var backgroundColor = PaletteColor.white { didSet { refreshGradient() } }
@@ -230,6 +234,8 @@ final class EditorSession {
     /// Not observed by the UI, so controls don't dim for the length of every stroke;
     /// a stroke keeps the settings it started with, so edits made mid-stroke are harmless.
     @ObservationIgnored var brushStroke: BrushStroke? { didSet { resumeFileRequests() } }
+    /// A Smudge or Liquify stroke in progress.
+    @ObservationIgnored var warpStroke: WarpStroke? { didSet { resumeFileRequests() } }
 
     var canTransform: Bool {
         guard canEditLayers else { return false }
@@ -263,16 +269,16 @@ final class EditorSession {
         return LayerTransform(origin: CGPoint(x: minX, y: minY), size: CGSize(width: max(1, maxX - minX), height: max(1, maxY - minY)))
     }
     func selectLayer(_ id: UUID?) {
-        guard brushStroke == nil, levels == nil else { return }
+        guard brushStroke == nil, warpStroke == nil, levels == nil else { return }
         if id != activeLayerID { commitTransform(); resolveGradient() }
         activeLayerID = id
     }
     func selectTool(_ value: NavigationTool) {
-        guard !isProjectBusy, brushStroke == nil, levels == nil else { return }
+        guard !isProjectBusy, brushStroke == nil, warpStroke == nil, levels == nil else { return }
         if tool != value { commitTransform(); cancelCrop(); resolveGradient(); cancelLasso(); cancelShape() }
-        if (tool == .cloneStamp) != (value == .cloneStamp) {
-            let parked = parkedBrushTip
-            parkedBrushTip = (brushSettings.diameter, brushSettings.hardness, brushSettings.opacity)
+        let from = Self.tipFamily(tool), to = Self.tipFamily(value)
+        if from != to, let parked = parkedBrushTips[to] {
+            parkedBrushTips[from] = (brushSettings.diameter, brushSettings.hardness, brushSettings.opacity)
             var settings = brushSettings
             settings.diameter = parked.diameter
             settings.hardness = parked.hardness
@@ -431,7 +437,7 @@ final class EditorSession {
     var isModified: Bool { history.isModified }
     var canUseHistory: Bool {
         _ = showsBusy
-        return !isProjectBusy && !isImporting && brushStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && transformEdit == nil
+        return !isProjectBusy && !isImporting && brushStroke == nil && warpStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && transformEdit == nil
     }
     var canUndo: Bool { canUseHistory && (history.canUndo || gradientEdit != nil) }
     var canRedo: Bool { canUseHistory && history.canRedo }
@@ -468,7 +474,7 @@ final class EditorSession {
     var activeLayer: ImageLayer? { document?.layers.first { $0.id == activeLayerID } }
     var canEditLayers: Bool {
         _ = showsBusy
-        return document != nil && brushStroke == nil && !isProjectBusy && !isImporting && !showsNewDocument && !showsImporter && renamingLayerID == nil && transformEdit == nil && cropRect == nil && gradientEdit == nil && pixelMove == nil && hueSaturation == nil && levels == nil && filterEdit == nil && adjustmentEditingID == nil
+        return document != nil && brushStroke == nil && warpStroke == nil && !isProjectBusy && !isImporting && !showsNewDocument && !showsImporter && renamingLayerID == nil && transformEdit == nil && cropRect == nil && gradientEdit == nil && pixelMove == nil && hueSaturation == nil && levels == nil && filterEdit == nil && adjustmentEditingID == nil
     }
 
     func addBlankLayer() {
