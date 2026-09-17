@@ -37,6 +37,8 @@ nonisolated struct ProjectLayerRecord: Codable, Sendable {
     var maskPlacement: LayerTransform? = nil
     /// Nil (older projects) is linked.
     var maskLinked: Bool? = nil
+    /// A shape layer's shape, drawn again when the layer is scaled. Older versions ignore it and keep the pixels.
+    var shape: LayerShapeStyle? = nil
 }
 
 nonisolated struct ProjectSnapshot: @unchecked Sendable {

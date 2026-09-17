@@ -27,7 +27,7 @@ actor CanvasResizer {
                     moved.origin.x += offset.x
                     moved.origin.y += offset.y
                     return moved
-                }, maskLinked: layer.maskLinked))
+                }, maskLinked: layer.maskLinked, shape: layer.shape))
         }
         var images = snapshot.images
         // A colored extension is separate bottom-layer content. The old canvas

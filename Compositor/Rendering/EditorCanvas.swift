@@ -692,7 +692,10 @@ final class CanvasView: NSView {
                     height: owner.asset?.image.height ?? Int(base.size.height.rounded()),
                     limit: session.transformEdit != nil ? min(2048, steady) : steady)
             }()
-            if let stroke, !stroke.isMask {
+            if stroke == nil, let shaped = session.shapeTransformPreview(for: layer, transform: transform) {
+                LayerRenderer.draw(shaped, transform: transform, center: center(transform.center), scale: scale,
+                    opacity: layer.opacity, blendMode: session.displayedBlendMode(for: layer), mask: mask, in: context)
+            } else if let stroke, !stroke.isMask {
                 // Painting pixels previews exactly as the finished layer will look, with the layer's own
                 // sampling, so nothing shifts when a stroke starts or ends (see TiledLayerRenderer).
                 let previous = stroke.layer.asset

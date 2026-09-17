@@ -1,6 +1,6 @@
 import AppKit
 
-nonisolated enum ShapeKind: String, CaseIterable, Sendable {
+nonisolated enum ShapeKind: String, CaseIterable, Codable, Sendable {
     case rectangle = "Rectangle"
     case ellipse = "Ellipse"
     /// The shape filling `rect`. A rectangle's corners round by `cornerRadius`, at most half its shorter
@@ -10,6 +10,38 @@ nonisolated enum ShapeKind: String, CaseIterable, Sendable {
         let radius = min(max(0, cornerRadius), rect.width / 2, rect.height / 2)
         guard radius > 0 else { return CGPath(rect: rect, transform: nil) }
         return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+}
+
+/// What a shape layer draws, kept so the shape can be drawn again at a new size.
+nonisolated struct LayerShapeStyle: Codable, Equatable, Sendable {
+    var kind: ShapeKind
+    var red: CGFloat
+    var green: CGFloat
+    var blue: CGFloat
+    /// Document pixels, whatever size the shape is scaled to.
+    var cornerRadius: CGFloat
+    var color: PaletteColor { PaletteColor(red: red, green: green, blue: blue) }
+}
+
+/// A layer made with the Shape tool. Its pixels are an ordinary raster, so it clips, masks, blends and filters like
+/// any layer; `image` is the raster the shape drew. Once anything else changes those pixels (painting, a filter),
+/// the layer's image is no longer this one and the layer is plain pixels from then on.
+nonisolated struct LayerShape: Equatable, @unchecked Sendable {
+    var style: LayerShapeStyle
+    let image: CGImage
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.style == rhs.style && lhs.image === rhs.image }
+    static func loaded(_ style: LayerShapeStyle?, image: CGImage?) -> LayerShape? {
+        guard let style, let image else { return nil }
+        return LayerShape(style: style, image: image)
+    }
+}
+
+extension ImageLayer {
+    /// The shape this layer still is: nil once its pixels were edited some other way.
+    var liveShape: LayerShape? {
+        guard let shape, let image = asset?.image, image === shape.image else { return nil }
+        return shape
     }
 }
 
@@ -63,8 +95,10 @@ extension EditorSession {
         }
         do {
             let image = try Self.shapeImage(draft.kind, size: rect.size, color: foregroundColor, cornerRadius: draft.cornerRadius)
+            let style = LayerShapeStyle(kind: draft.kind, red: foregroundColor.red, green: foregroundColor.green,
+                                        blue: foregroundColor.blue, cornerRadius: draft.cornerRadius)
             addPixelLayer(image, at: rect.origin, name: nextShapeName(draft.kind), editName: draft.kind.rawValue,
-                          dropsSelection: false)
+                          dropsSelection: false, shape: LayerShape(style: style, image: image))
         } catch { brushError = error.localizedDescription }
     }
 
@@ -74,6 +108,41 @@ extension EditorSession {
         var number = 1
         while names.contains("\(kind.rawValue) \(number)") { number += 1 }
         return "\(kind.rawValue) \(number)"
+    }
+
+    /// A shape layer scaled to a new size draws its shape again at that size, so a rounded corner keeps its radius
+    /// instead of stretching. Part of the edit that changed the size.
+    func redrawShape(at index: Int) {
+        guard let layer = document?.layers[index], let shape = layer.liveShape, let asset = layer.asset else { return }
+        let width = max(1, Int(layer.transform.size.width.rounded())), height = max(1, Int(layer.transform.size.height.rounded()))
+        guard width != asset.image.width || height != asset.image.height, width * height <= Self.maxShapePixels,
+              let image = try? Self.shapeImage(shape.style.kind, size: CGSize(width: width, height: height),
+                                               color: shape.style.color, cornerRadius: shape.style.cornerRadius),
+              let thumbnail = try? PixelInvert.thumbnail(of: image) else { return }
+        // A mask that follows the layer's pixel grid stays exactly where it is while that grid changes size.
+        if let mask = layer.mask, mask.placement == nil { document?.layers[index].mask?.placement = layer.maskTransform }
+        document?.layers[index].asset = ImportedImage(image: image, thumbnail: thumbnail, name: asset.name)
+        document?.layers[index].shape = LayerShape(style: shape.style, image: image)
+    }
+
+    /// While a rounded rectangle is being scaled, the shape drawn at the size it's being dragged to, so its corners
+    /// keep their radius during the drag rather than only once it's applied. At most 2048 pixels across (the radius
+    /// scales down with it); nil for any other layer, which just stretches until the redraw at commit.
+    func shapeTransformPreview(for layer: ImageLayer, transform: LayerTransform) -> CGImage? {
+        guard transformEdit != nil, let shape = layer.liveShape, shape.style.kind == .rectangle, shape.style.cornerRadius > 0 else {
+            if !shapeTransformPreviewCache.isEmpty, transformEdit == nil { shapeTransformPreviewCache = [:] }
+            return nil
+        }
+        let size = transform.size
+        guard size.width >= 1, size.height >= 1,
+              abs(size.width - CGFloat(shape.image.width)) >= 0.5 || abs(size.height - CGFloat(shape.image.height)) >= 0.5 else { return nil }
+        let factor = min(1, 2048 / max(size.width, size.height))
+        let drawn = CGSize(width: max(1, (size.width * factor).rounded()), height: max(1, (size.height * factor).rounded()))
+        if let cached = shapeTransformPreviewCache[layer.id], cached.size == drawn { return cached.image }
+        guard let image = try? Self.shapeImage(.rectangle, size: drawn, color: shape.style.color,
+                                               cornerRadius: shape.style.cornerRadius * factor) else { return nil }
+        shapeTransformPreviewCache[layer.id] = (drawn, image)
+        return image
     }
 
     /// The shape filling its box, anti-aliased where it curves.

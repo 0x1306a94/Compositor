@@ -12,8 +12,12 @@ final class CompositorApplicationDelegate: NSObject, NSApplicationDelegate {
 
     // Finder Open With and Dock drops, including files delivered during launch.
     func application(_ application: NSApplication, open urls: [URL]) {
-        showEditor?()
-        application.activate(ignoringOtherApps: true)
+        // Reopening a window that's already showing makes SwiftUI rebuild it, so the app blinks out and back:
+        // only a closed editor is reopened.
+        if !application.windows.contains(where: { $0.isVisible && $0.identifier?.rawValue.hasPrefix("editor") == true }) {
+            showEditor?()
+        }
+        application.activate()
         Task { await workspace.receive(urls) }
     }
 
