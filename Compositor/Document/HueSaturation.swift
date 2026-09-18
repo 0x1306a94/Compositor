@@ -235,11 +235,11 @@ nonisolated enum HueSaturationFilter {
 
     static func run(_ job: HueSaturationJob) throws -> AdjustedPixels {
         let width = job.image.width, height = job.image.height
-        // Unpremultiply first so color math never leaks into transparent pixels, and alpha is kept.
-        let adjusted = CIImage(cgImage: job.image).unpremultiplyingAlpha()
+        // CIColorCube unpremultiplies and premultiplies around its lookup itself. Doing it again here darkened
+        // every translucent pixel (half-transparent blue came out at 94 of 128), which turned soft edges black.
+        let adjusted = CIImage(cgImage: job.image)
             .applyingFilter("CIColorCube", parameters: ["inputCubeDimension": dimension,
                                                         "inputCubeData": cube(job.settings)])
-            .premultiplyingAlpha()
         var result = try PixelAdjust.render(adjusted, width: width, height: height, isMask: false)
         if let selection = job.selection {
             let original = try PixelAdjust.bitmap(width: width, height: height, mask: false)
