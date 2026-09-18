@@ -385,7 +385,7 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
     /// The layer's own name, without the mark a clipped layer's row shows in front of it.
     private var layerName = ""
     private var renaming = false
-    private let eye = NSButton()
+    private let eye = EyeSwipeButton()
     private let disclosure = NSButton()
     private var indentation: NSLayoutConstraint!
     private let thumbnail = LayerThumbnailButton()
@@ -585,7 +585,9 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
         eye.image = NSImage(systemSymbolName: layer.isVisible ? "eye" : "eye.slash", accessibilityDescription: nil)
         eye.setAccessibilityLabel("\(layer.isVisible ? "Hide" : "Show") \(layer.name)")
         eye.isEnabled = enabled
-        alphaValue = visible ? 1 : 0.55
+        eye.layerID = layer.id
+        eye.session = session
+        alphaValue = visible ? 1 : 0.35
     }
     private var maskThumbnailKey: ThumbnailKey?
     func updateTarget() {
@@ -857,6 +859,30 @@ private final class RowEdgeLine: NSView {
         NSRect(x: 0, y: 0, width: bounds.width, height: 1 / scale).fill()
     }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+/// A layer's eye. Pressing it shows or hides the layer; keeping the button down and dragging up or down the list
+/// gives every eye passed over the same state, as in Photoshop.
+private final class EyeSwipeButton: NSButton {
+    var layerID: UUID?
+    weak var session: EditorSession?
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled, let layerID, let session, let window,
+              let visible = session.beginVisibilitySwipe(layerID) else { return }
+        // Showing or hiding a layer reloads its row, which can take this very button out of the list; tracking the
+        // drag here, rather than waiting for mouseDragged and mouseUp to arrive, keeps the undo step from being left
+        // open if it does.
+        defer { session.endVisibilitySwipe() }
+        var ancestor = superview
+        while ancestor != nil && !(ancestor is NSTableView) { ancestor = ancestor?.superview }
+        guard let table = ancestor as? NSTableView else { return }
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseUp { return }
+            let row = table.row(at: table.convert(next.locationInWindow, from: nil))
+            guard session.layerRows.indices.contains(row) else { continue }
+            session.setVisibilityInSwipe(session.layerRows[row].layer.id, visible: visible)
+            table.autoscroll(with: next)
+        }
+    }
 }
 private final class MaskDisabledMark: NSTextField {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

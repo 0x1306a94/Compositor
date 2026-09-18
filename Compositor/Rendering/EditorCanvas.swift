@@ -365,6 +365,36 @@ final class CanvasView: NSView {
         return NSCursor(image: image, hotSpot: NSPoint(x: 3, y: 21))
     }()
 
+    /// The Zoom tool's cursors: a magnifier with a plus, or a minus while Option is held.
+    private static func zoomCursor(out: Bool) -> NSCursor {
+        let symbol = NSImage(systemSymbolName: out ? "minus.magnifyingglass" : "plus.magnifyingglass",
+                             accessibilityDescription: out ? "Zoom out" : "Zoom in")!
+        let white = symbol.withSymbolConfiguration(.init(paletteColors: [.white]))!
+        let black = symbol.withSymbolConfiguration(.init(paletteColors: [.black]))!
+        let image = NSImage(size: NSSize(width: 24, height: 24), flipped: false) { _ in
+            let glyph = CGRect(x: 2, y: 2, width: 20, height: 20)
+            for step in 0..<16 {
+                let angle = CGFloat(step) * .pi / 8
+                white.draw(in: glyph.offsetBy(dx: cos(angle) * 1.25, dy: sin(angle) * 1.25))
+            }
+            // The lens filled white, so the cursor reads on any image. Measured from the symbol: its lens sits at
+            // 41% across and 40% down the glyph, with an inside radius of about 27% of it.
+            let center = CGPoint(x: glyph.minX + glyph.width * 0.41, y: glyph.maxY - glyph.height * 0.40)
+            let radius = glyph.width * 0.29
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)).fill()
+            black.draw(in: glyph)
+            return true
+        }
+        // The lens's center, toward the top-left of the glyph.
+        return NSCursor(image: image, hotSpot: NSPoint(x: 10, y: 10))
+    }
+    private static let zoomInCursor = zoomCursor(out: false)
+    private static let zoomOutCursor = zoomCursor(out: true)
+    /// A Zoom tool press: dragging left or right zooms smoothly about where it began; a press that doesn't move
+    /// zooms a step on release instead.
+    private var zoomDrag: (start: CGPoint, zoom: CGFloat, moved: Bool)?
+
     private struct DisplayState: Equatable {
         struct Layer: Equatable {
             let id: UUID
@@ -904,6 +934,7 @@ final class CanvasView: NSView {
             // The Move tool's cursor depends on the pointer (handles, Option to duplicate), so match it here.
             : session.tool == .move ? window.map { transformCursor(at: convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? .arrow
             : session.tool == .idle ? .arrow
+            : session.tool == .zoom ? (optionHeld ? Self.zoomOutCursor : Self.zoomInCursor)
             : .crosshair
         addCursorRect(bounds, cursor: cursor)
         guard session.tool == .crop, !spaceHeld else { return }
@@ -1201,11 +1232,18 @@ final class CanvasView: NSView {
         } else if session.tool == .move {
             beginTransformDrag(at: point, modifiers: event.modifierFlags)
         } else if session.tool == .zoom {
-            session.zoom(to: session.viewport.zoom * (event.modifierFlags.contains(.option) ? 0.5 : 2), anchor: point)
+            zoomDrag = (point, session.viewport.zoom, false)
         }
     }
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if var drag = zoomDrag {
+            let dx = point.x - drag.start.x
+            if abs(dx) >= 3 { drag.moved = true; zoomDrag = drag }
+            // Right zooms in, left out: doubling for every 100 points dragged.
+            if drag.moved { session.zoom(to: drag.zoom * pow(2, dx / 100), anchor: drag.start) }
+            return
+        }
         if samplingColor { sampleColor(at: point); return }
         if let start = hueTargetStart {
             session.dragHueTargeting(byViewDelta: point.x - start.x,
@@ -1323,6 +1361,13 @@ final class CanvasView: NSView {
     }
     override func mouseUp(with event: NSEvent) {
         stopMarqueeAutoscroll()
+        if let drag = zoomDrag {
+            zoomDrag = nil
+            if !drag.moved {
+                session.zoom(to: session.viewport.zoom * (event.modifierFlags.contains(.option) ? 0.5 : 2), anchor: drag.start)
+            }
+            return
+        }
         session.snapGuides = ([], [])
         if samplingColor {
             samplingColor = false

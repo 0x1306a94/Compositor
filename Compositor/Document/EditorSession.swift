@@ -549,6 +549,22 @@ final class EditorSession {
         document?.layers[index].isVisible.toggle()
     }
 
+    /// Photoshop's eye swipe: pressing an eye shows or hides that layer, and dragging over other eyes gives them the
+    /// same state, all as one undo step (`beginEdit` at the press, `endEdit` when the button comes up).
+    func beginVisibilitySwipe(_ id: UUID) -> Bool? {
+        guard canEditLayers, let layer = document?.layers.first(where: { $0.id == id }) else { return nil }
+        let visible = !layer.isVisible
+        beginEdit(visible ? "Show Layer" : "Hide Layer")
+        setVisibilityInSwipe(id, visible: visible)
+        return visible
+    }
+    func setVisibilityInSwipe(_ id: UUID, visible: Bool) {
+        guard let index = document?.layers.firstIndex(where: { $0.id == id }),
+              document?.layers[index].isVisible != visible else { return }
+        document?.layers[index].isVisible = visible
+    }
+    func endVisibilitySwipe() { endEdit() }
+
     func reorderLayers(from offsets: IndexSet, to destination: Int) {
         guard canEditLayers, var layers = document?.layers.reversed().map({ $0 }),
               offsets.allSatisfy({ layers.indices.contains($0) }), (0...layers.count).contains(destination) else { return }
