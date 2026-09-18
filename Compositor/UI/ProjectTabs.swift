@@ -158,7 +158,9 @@ private struct ProjectTabDropDelegate: DropDelegate {
     let destination: UUID?
     @Binding var targeted: Bool
     func validateDrop(info: DropInfo) -> Bool {
-        workspace?.canSwitch == true && workspace?.canReceiveDrag(into: destination) == true
+        // Option-dragging a layer duplicates it within the Layers panel, so it is not a drag to another project.
+        if NSEvent.modifierFlags.contains(.option), info.hasItemsConforming(to: [ProjectWorkspace.layerType]) { return false }
+        return workspace?.canSwitch == true && workspace?.canReceiveDrag(into: destination) == true
             && info.hasItemsConforming(to: [ProjectWorkspace.layerType, UTType.fileURL.identifier, UTType.image.identifier])
     }
     func dropEntered(info: DropInfo) { targeted = validateDrop(info: info) }

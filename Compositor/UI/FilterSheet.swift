@@ -28,8 +28,22 @@ struct FilterSheet: View {
                 control("Size", \.grain.size, range: GrainSettings.sizeRange, unit: "px", decimals: 1, logarithmic: true)
                 control("Roughness", \.grain.roughness, range: GrainSettings.roughnessRange, unit: "", decimals: 0, logarithmic: false)
             case .removeBackground:
-                Text("Keep the foreground subjects and make the background transparent.")
+                Text("Hide the background behind a layer mask, keeping the foreground subjects. The pixels stay, so the background can be painted back at any time.")
                     .fixedSize(horizontal: false, vertical: true)
+                Picker("Quality", selection: Binding(get: { settings.backgroundQuality },
+                                                     set: { new in update { $0.backgroundQuality = new } })) {
+                    ForEach(BackgroundQuality.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .help("Basic is quick; Advanced refines the mask against the layer's own detail, for hair and fur")
+                if settings.backgroundQuality == .advanced {
+                    control("Refine", \.refineEdges, range: 0...40, unit: "px", decimals: 0, logarithmic: false)
+                        .help("Pull the mask onto the image's own edges, which recovers hair and fur")
+                    control("Contrast", \.matteContrast, range: 0...100, unit: "%", decimals: 0, logarithmic: false)
+                        .help("Clear the haze that leaves background showing through thin areas")
+                    control("Shift Edge", \.shiftEdge, range: -10...10, unit: "px", decimals: 0, logarithmic: false)
+                        .help("Shrink the mask to drop the rim of background color around the subject, or grow it")
+                }
             case .contentAwareFill:
                 Text("Fill the selection using surrounding pixels from this layer.")
                     .fixedSize(horizontal: false, vertical: true)
@@ -63,7 +77,13 @@ struct FilterSheet: View {
             HStack {
                 Button("Cancel") { session.cancelFilter() }.keyboardShortcut(.cancelAction)
                 Spacer()
-                if edit?.committing == true { ProgressView().controlSize(.small) }
+                // While the preview is being worked out (Remove Background's mask, Content-Aware Fill) OK waits, so
+                // the panel says what it is waiting for rather than showing a disabled button and nothing else.
+                if edit?.committing == true || edit?.preparing == true {
+                    ProgressView().controlSize(.small)
+                    Text(edit?.committing == true ? "Applying…" : "Working…")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 Button("OK") { Task { await session.commitFilter() } }
                     .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
                     .disabled(edit?.kind.isAutomatic == true && (edit?.preparing == true || edit?.previewError != nil))

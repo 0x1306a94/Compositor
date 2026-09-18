@@ -15,6 +15,8 @@ nonisolated struct BrushSettings: Sendable {
     /// Caps the whole stroke, as in Photoshop: overlapping dabs never exceed it.
     var opacity: CGFloat = 1
     /// Spot-healing uses nearby source pixels instead of the foreground color.
+    /// Erase: the stroke clears the layer's pixels instead of painting color on them.
+    var erasing = false
     var healing = false
     var healingMode: SpotHealingMode = .contentAware
 }
@@ -471,6 +473,12 @@ final class BrushStroke {
                     // While painting, the area to heal shows as a dark wash, as in Photoshop;
                     // `heal()` rebuilds it from its surroundings when the stroke ends.
                     BrushRaster.fill(Self.healingWash, coverage: mask, in: local, alpha: 0.45, context: tile.context)
+                } else if settings.erasing, !isMask {
+                    // Erasing takes the coverage out of the layer's alpha, leaving the pixels under it transparent.
+                    tile.context.saveGState()
+                    tile.context.setBlendMode(.destinationOut)
+                    BrushRaster.fill(Self.eraseColor, coverage: mask, in: local, alpha: settings.opacity, context: tile.context)
+                    tile.context.restoreGState()
                 } else {
                     BrushRaster.fill(paintColor, coverage: mask, in: local, alpha: settings.opacity, context: tile.context)
                 }
@@ -484,6 +492,7 @@ final class BrushStroke {
         }
     }
 
+    private static let eraseColor = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
     private static let healingWash = CGColor(srgbRed: 0.12, green: 0.12, blue: 0.12, alpha: 1)
 
     private func dab(_ point: CGPoint, changed: inout Set<Int>) throws {

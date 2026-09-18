@@ -275,22 +275,25 @@ final class LayerTableView: NSTableView {
             return
         }
         clippingCursorActive = true
+        (clippingCursor(at: point) ?? .arrow).set()
+    }
+
+    /// With Option held, the cursor for whatever is under `point`: the clipping cursor over the bottom of a row,
+    /// the duplicate cursor over the rest of it and over a mask thumbnail an Option-drag can copy.
+    private func clippingCursor(at point: NSPoint) -> NSCursor? {
         let index = row(at: point)
-        guard let session, session.layerRows.indices.contains(index) else { NSCursor.arrow.set(); return }
+        guard let session, session.layerRows.indices.contains(index) else { return nil }
         let layer = session.layerRows[index].layer
         if let thumbnail = thumbnail(at: point), thumbnail.isMaskTarget, !thumbnail.isHidden {
-            (session.canEditLayers ? CanvasView.duplicateCursor : NSCursor.arrow).set()
-            return
+            return session.canEditLayers ? CanvasView.duplicateCursor : NSCursor.arrow
         }
-        // Over the bottom of a row Option makes or releases a clipping mask; over the rest of it an Option-drag
-        // drops a duplicate of the layer.
         guard isClippingZone(point, row: index) else {
-            (session.canEditLayers && layer.isGroup != true ? CanvasView.duplicateCursor : NSCursor.arrow).set()
-            return
+            return session.canEditLayers && layer.isGroup != true ? CanvasView.duplicateCursor : NSCursor.arrow
         }
-        guard session.canToggleClippingMask(layer.id) else { NSCursor.arrow.set(); return }
-        (layer.maskSourceID == nil ? Self.createClippingCursor : Self.releaseClippingCursor).set()
+        guard session.canToggleClippingMask(layer.id) else { return NSCursor.arrow }
+        return layer.maskSourceID == nil ? Self.createClippingCursor : Self.releaseClippingCursor
     }
+
     /// The bottom quarter of a row, where Option-click clips the layer to the one below.
     private func isClippingZone(_ point: NSPoint, row: Int) -> Bool {
         guard row >= 0 else { return false }
@@ -316,6 +319,12 @@ final class LayerTableView: NSTableView {
     override func mouseMoved(with event: NSEvent) { refreshClippingCursor(event.modifierFlags, at: event.locationInWindow) }
     override func cursorUpdate(with event: NSEvent) { refreshClippingCursor(event.modifierFlags, at: event.locationInWindow) }
     override func mouseExited(with event: NSEvent) {
+        // Reloading rows (after a brush stroke, say) rebuilds the tracking areas, which sends an exit even though
+        // the pointer never left: taking the cursor back then makes it flicker. Only a real exit resets it.
+        if let window, visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+            refreshClippingCursor(NSEvent.modifierFlags)
+            return
+        }
         if clippingCursorActive { NSCursor.arrow.set(); clippingCursorActive = false }
     }
 
@@ -350,11 +359,15 @@ final class LayerTableView: NSTableView {
             session?.swapPaletteColors()
         } else if plain, event.charactersIgnoringModifiers?.lowercased() == "d" {
             session?.resetPaletteColors()
-        } else if plain, ["a", "v", "h", "z", "b", "g", "l", "m", "w", "j", "s", "u", "r"].contains(event.charactersIgnoringModifiers?.lowercased() ?? "") {
+        } else if plain, ["a", "v", "h", "z", "b", "e", "g", "l", "m", "w", "j", "s", "u", "r", "i", "c"].contains(event.charactersIgnoringModifiers?.lowercased() ?? "") {
             let key = event.charactersIgnoringModifiers?.lowercased()
             if key == "m" { if !event.isARepeat { session?.pressMarqueeKey() } }
             else if key == "l" { if !event.isARepeat { session?.pressLassoKey() } }
-            else { session?.selectTool(key == "a" ? .idle : key == "r" ? .blur : key == "b" ? .brush : key == "g" ? .gradient : key == "l" ? .lasso : key == "m" ? .marquee : key == "w" ? .wand : key == "j" ? .spotHealing : key == "s" ? .cloneStamp : key == "u" ? .shape : key == "v" ? .move : key == "h" ? .hand : .zoom) }
+            else if key == "b" || key == "e" {
+                session?.selectTool(.brush)
+                session?.brushMode = key == "e" ? .erase : .paint
+            }
+            else { session?.selectTool(key == "a" ? .idle : key == "i" ? .eyedropper : key == "c" ? .crop : key == "r" ? .blur : key == "b" ? .brush : key == "g" ? .gradient : key == "l" ? .lasso : key == "m" ? .marquee : key == "w" ? .wand : key == "j" ? .spotHealing : key == "s" ? .cloneStamp : key == "u" ? .shape : key == "v" ? .move : key == "h" ? .hand : .zoom) }
         } else if plain, let digit = Int(event.charactersIgnoringModifiers ?? ""), session?.usesOpacityKeys == true {
             session?.typeOpacityDigit(digit)
         // With the Move tool the arrows move the layer, as on the canvas, rather than changing the row selection.
@@ -765,7 +778,12 @@ private final class LayerThumbnailButton: NSButton, NSDraggingSource {
         hovering = false
         if let modifierMonitor { NSEvent.removeMonitor(modifierMonitor) }
         modifierMonitor = nil
-        NSCursor.arrow.set()
+        // The list decides what the cursor is anywhere else in the row; leaving a thumbnail is not a reason to
+        // drop the clipping or duplicate cursor it is showing.
+        var ancestor = superview
+        while ancestor != nil && !(ancestor is LayerTableView) { ancestor = ancestor?.superview }
+        if let table = ancestor as? LayerTableView { table.refreshClippingCursor(NSEvent.modifierFlags) }
+        else { NSCursor.arrow.set() }
     }
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)

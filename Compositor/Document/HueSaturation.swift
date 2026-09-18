@@ -379,8 +379,9 @@ final class HueSaturationEdit {
     /// Not observed: canvas redraws are driven by `brushRevision`.
     @ObservationIgnored private(set) var preparedPreview: CGImage?
 
-    /// Previews render at most this many pixels on the longest side.
-    static let previewLimit = 2048
+    /// Previews render at most this many pixels on the longest side: full size for anything ordinary, so the canvas
+    /// shows the real thing rather than a coarse copy stretched to fit, as a Hue/Saturation layer already does.
+    static let previewLimit = 8000
 
     init(layerID: UUID, original: ImportedImage, selection: SelectionClip?, transform: LayerTransform) throws {
         self.layerID = layerID

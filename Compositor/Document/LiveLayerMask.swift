@@ -36,6 +36,20 @@ extension EditorSession {
         endEdit()
         return true
     }
+    /// A layer dropped into the middle of a clipping group joins it, as in Photoshop: dropped between a base and a
+    /// layer clipped to it, it is clipped to that base too. Run while the layers are being rearranged, before
+    /// `releaseDetachedClipping` — an unclipped layer left in the middle of a group breaks it up instead.
+    static func adoptClipping(_ id: UUID, in layers: inout [ImageLayer]) {
+        guard let layer = layers.first(where: { $0.id == id }), !layer.isGroup else { return }
+        let siblings = layers.filter { $0.parentID == layer.parentID }
+        guard let index = siblings.firstIndex(where: { $0.id == id }), index > 0, index + 1 < siblings.count,
+              let source = siblings[index + 1].maskSourceID, source != id else { return }
+        let below = siblings[index - 1]
+        guard below.id == source || below.maskSourceID == source,
+              let position = layers.firstIndex(where: { $0.id == id }) else { return }
+        layers[position].maskSourceID = source
+    }
+
     func removeLiveMask(from target: UUID) {
         guard canEditLayers, let document else { return }
         guard let targetLayer = document.layers.first(where: { $0.id == target }),
@@ -151,9 +165,15 @@ extension EditorSession {
         let live = LiveMaskRenderer(bounds: context.boundingBoxOfClipPath, source: { records[$0]?.maskSourceID }) { id, ctx in
             guard let layer = records[id], let image = layer.asset?.image else { return }
             let transform = self.displayedTransform(for: layer)
-            LayerRenderer.draw(image, transform: transform, center: transform.center, opacity: layer.opacity,
-                blendMode: self.displayedBlendMode(for: layer),
-                mask: layer.mask?.clipImage(placement: self.displayedMaskPlacement(for: layer), over: transform, width: image.width, height: image.height), in: ctx)
+            let mask = layer.mask?.clipImage(placement: self.displayedMaskPlacement(for: layer), over: transform, width: image.width, height: image.height)
+            func drawLayer(_ mode: LayerBlendMode, _ target: CGContext) {
+                LayerRenderer.draw(image, transform: transform, center: transform.center, opacity: layer.opacity,
+                    blendMode: mode, mask: mask, in: target)
+            }
+            let mode = self.displayedBlendMode(for: layer)
+            // Core Graphics blends these two wrong; see SeparableBlend.
+            if SeparableBlend.isCoreGraphicsWrong(mode), SeparableBlend.draw(mode, in: ctx, body: { drawLayer(.normal, $0) }) { return }
+            drawLayer(mode, ctx)
         }
         live.adjustment = { records[$0]?.adjustment }
         live.adjustmentOpacity = { records[$0]?.opacity ?? 1 }

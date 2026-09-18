@@ -5,7 +5,14 @@ struct BrushControls: View {
     @Bindable var session: EditorSession
     var body: some View {
         HStack(spacing: 12) {
-            Text(session.tool == .spotHealing ? "Spot Healing" : session.tool == .cloneStamp ? "Clone Stamp" : session.tool == .blur ? "Smear" : "Brush").font(ToolHeaderStyle.titleFont)
+            Text(session.tool == .spotHealing ? "Spot Healing" : session.tool == .cloneStamp ? "Clone Stamp" : session.tool == .blur ? "Smear" : session.brushMode == .erase ? "Eraser" : "Brush").font(ToolHeaderStyle.titleFont)
+            if session.tool == .brush {
+                Picker("Mode", selection: $session.brushMode) {
+                    ForEach(BrushToolMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                .help("Paint with the foreground color (B), or erase pixels away (E)")
+            }
             if session.tool == .blur {
                 Picker("Mode", selection: $session.blurMode) {
                     ForEach(BlurToolMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }

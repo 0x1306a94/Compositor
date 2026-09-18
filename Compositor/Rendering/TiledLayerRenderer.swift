@@ -258,11 +258,25 @@ nonisolated enum TiledLayerRenderer {
     /// Clips to `area` less `holes` (grid pixels) with hard edges, so neighbouring draws meet exactly.
     private static func clip(to area: CGRect, excluding holes: [CGRect], frame: Frame, in context: CGContext) {
         context.setShouldAntialias(false)
-        let outline = CGPath(rect: frame.mapped(area), transform: nil)
+        let outline = CGPath(rect: snapped(frame.mapped(area), in: context), transform: nil)
         let cut = CGMutablePath()
-        for hole in holes where hole.intersects(area) { cut.addRect(frame.mapped(hole)) }
+        for hole in holes where hole.intersects(area) { cut.addRect(snapped(frame.mapped(hole), in: context)) }
         context.addPath(cut.isEmpty ? outline : outline.subtracting(cut, using: .winding))
         context.clip()
+    }
+
+    /// A clip edge on a fraction of a screen pixel leaves that pixel to be rounded one way here and the other way in
+    /// the neighbouring piece, which shows as a hairline across translucent pixels. Rounding each edge to whole
+    /// screen pixels first makes two pieces that share an edge round it the same way and meet exactly. Skipped for a
+    /// rotated layer, whose pieces don't lie along the screen's pixels at all.
+    private static func snapped(_ rect: CGRect, in context: CGContext) -> CGRect {
+        let toDevice = context.userSpaceToDeviceSpaceTransform
+        guard abs(toDevice.b) < 1e-9, abs(toDevice.c) < 1e-9, toDevice.a != 0, toDevice.d != 0 else { return rect }
+        let device = rect.applying(toDevice)
+        let snapped = CGRect(x: device.minX.rounded(), y: device.minY.rounded(),
+                             width: max(0, device.maxX.rounded() - device.minX.rounded()),
+                             height: max(0, device.maxY.rounded() - device.minY.rounded()))
+        return snapped.applying(toDevice.inverted())
     }
 
     private static func clipToMask(_ mask: CGImage, in rect: CGRect, frame: Frame, context: CGContext) {

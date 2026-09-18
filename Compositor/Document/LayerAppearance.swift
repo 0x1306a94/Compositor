@@ -5,6 +5,7 @@ nonisolated enum LayerBlendMode: String, Codable, CaseIterable, Sendable {
     case normal = "Normal", multiply = "Multiply", screen = "Screen", overlay = "Overlay"
     case darken = "Darken", lighten = "Lighten", difference = "Difference"
     case colorDodge = "Color Dodge", colorBurn = "Color Burn"
+    case hue = "Hue", saturation = "Saturation", color = "Color", luminosity = "Luminosity"
     var cgMode: CGBlendMode {
         switch self {
         case .normal: .normal
@@ -16,6 +17,10 @@ nonisolated enum LayerBlendMode: String, Codable, CaseIterable, Sendable {
         case .difference: .difference
         case .colorDodge: .colorDodge
         case .colorBurn: .colorBurn
+        case .hue: .hue
+        case .saturation: .saturation
+        case .color: .color
+        case .luminosity: .luminosity
         }
     }
 }

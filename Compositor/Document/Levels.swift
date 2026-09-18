@@ -119,7 +119,9 @@ final class LevelsEdit {
     init(layer: ImageLayer, selection: SelectionClip?) throws {
         layerID = layer.id; original = layer.asset!; transform = layer.transform; self.selection = selection
         mapping = BrushRaster.pixelToDocument(transform, width: original.image.width, height: original.image.height)
-        let factor = min(1, 1024 / CGFloat(max(original.image.width, original.image.height)))
+        // Full size up to 8000 pixels on a side: a levels preview is a lookup table per pixel, quick enough to run
+        // on the whole layer, and a downscaled copy showed the canvas a coarse, pixelated version while dragging.
+        let factor = min(1, 8000 / CGFloat(max(original.image.width, original.image.height)))
         if factor < 1 {
             let w = max(1, Int(CGFloat(original.image.width) * factor)), h = max(1, Int(CGFloat(original.image.height) * factor))
             let context = try BrushRaster.context(width: w, height: h, mask: false)

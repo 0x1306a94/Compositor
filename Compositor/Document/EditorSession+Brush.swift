@@ -48,6 +48,7 @@ extension EditorSession {
         do {
             var settings = brushSettings
             settings.healing = tool == .spotHealing
+            settings.erasing = tool == .brush && brushMode == .erase && !isMaskSelected
             settings.healingMode = spotHealingMode
             if isMaskSelected { settings.red = maskPaintWhite ? 1 : 0; settings.green = settings.red; settings.blue = settings.red }
             let stroke = try makeRasterEdit(for: layer, settings: settings)
@@ -111,7 +112,7 @@ extension EditorSession {
             mask = original.replacing(ImportedImage(image: try raster.makeImage(), thumbnail: try raster.thumbnail(),
                 name: original.asset.name, raster: raster))
         }
-        beginEdit(stroke.editName ?? (stroke.isMask ? "Paint Mask" : stroke.isBlur ? "Blur" : stroke.clone != nil ? "Clone Stamp" : stroke.settings.healing ? "Spot Healing" : "Brush Stroke"))
+        beginEdit(stroke.editName ?? (stroke.isMask ? "Paint Mask" : stroke.settings.erasing ? "Erase" : stroke.isBlur ? "Blur" : stroke.clone != nil ? "Clone Stamp" : stroke.settings.healing ? "Spot Healing" : "Brush Stroke"))
         if stroke.isMask {
             document?.layers[index].mask = current.mask.map { $0.replacing(result.asset) } ?? LayerMask(asset: result.asset)
         } else {
@@ -191,6 +192,10 @@ extension EditorSession {
     }
     func changeBrushSize(increase: Bool) {
         guard brushStroke == nil else { return }
-        brushSettings.diameter = min(2000, max(1, (brushSettings.diameter * (increase ? 1.2 : 1 / 1.2)).rounded()))
+        // A step of a fifth, but always at least one pixel: 2 shrunk by a fifth would otherwise round back to 2,
+        // leaving the smallest brushes out of reach.
+        let current = brushSettings.diameter
+        let stepped = increase ? max(current + 1, (current * 1.2).rounded()) : min(current - 1, (current / 1.2).rounded())
+        brushSettings.diameter = min(2000, max(1, stepped))
     }
 }

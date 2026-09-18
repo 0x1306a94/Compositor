@@ -172,6 +172,7 @@ extension EditorSession {
             insertion = targetIndex + 1
         }
         layers.insert(layer, at: insertion)
+        Self.adoptClipping(id, in: &layers)
         Self.releaseDetachedClipping(in: &layers)
         guard (try? LayerHierarchy.validate(layers.map(\.hierarchyRecord))) != nil else { return false }
         beginEdit("Move Layer")

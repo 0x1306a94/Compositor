@@ -63,13 +63,16 @@ extension EditorSession {
         let clip = try selection?.clip(canvas: document.size)
         if clip != nil, clip?.coverage == nil { return nil }
         guard let region = selectionCopyRegion() else { return nil }
+        // Composited on its own first, then drawn through the selection: a transparency layer would do the same,
+        // but Color Burn and Color Dodge need to read what they are blending with, which a group hides.
+        let composite = try BrushRaster.context(width: Int(region.width), height: Int(region.height), mask: false)
+        composite.translateBy(x: -region.minX, y: -region.minY)
+        drawLiveComposite(document, in: composite)
+        guard let merged = composite.makeImage() else { throw ExportError.render }
         let context = try BrushRaster.context(width: Int(region.width), height: Int(region.height), mask: false)
         context.translateBy(x: -region.minX, y: -region.minY)
         clip?.apply(to: context)
-        context.beginTransparencyLayer(auxiliaryInfo: nil)
-        drawLiveComposite(document, in: context)
-
-        context.endTransparencyLayer()
+        BrushRaster.draw(merged, in: region, mask: false, context: context)
         guard let image = context.makeImage() else { throw ExportError.render }
         return (image, region)
     }

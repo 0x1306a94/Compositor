@@ -39,8 +39,15 @@ actor ImageExporter {
             try LiveMaskGraph.validate(snapshot.manifest.layers)
             let live = LiveMaskRenderer(bounds: CGRect(x: 0, y: 0, width: width, height: height), source: { records[$0]?.maskSourceID }) { id, target in
                 guard let layer = records[id], let image = snapshot.images[id]?.image else { return }
-                LayerRenderer.draw(image, transform: layer.transform, center: layer.transform.center, opacity: layer.opacity ?? 1, blendMode: layer.blendMode ?? .normal,
-                    mask: snapshot.mask(for: layer).flatMap { $0.clipImage(placement: $0.placement, over: layer.transform, width: image.width, height: image.height) }, in: target)
+                let mask = snapshot.mask(for: layer).flatMap { $0.clipImage(placement: $0.placement, over: layer.transform, width: image.width, height: image.height) }
+                func drawLayer(_ mode: LayerBlendMode, _ into: CGContext) {
+                    LayerRenderer.draw(image, transform: layer.transform, center: layer.transform.center,
+                        opacity: layer.opacity ?? 1, blendMode: mode, mask: mask, in: into)
+                }
+                let mode = layer.blendMode ?? .normal
+                // Core Graphics blends these two wrong; see SeparableBlend.
+                if SeparableBlend.isCoreGraphicsWrong(mode), SeparableBlend.draw(mode, in: target, body: { drawLayer(.normal, $0) }) { return }
+                drawLayer(mode, target)
             }
             live.adjustment = { records[$0]?.adjustment }
             live.adjustmentOpacity = { records[$0]?.opacity ?? 1 }

@@ -20,6 +20,13 @@ nonisolated enum FilterKind: String, CaseIterable, Sendable {
     var isImageAdjustment: Bool { self == .curves || self == .exposure || self == .gradientMap || self == .grain }
 }
 
+/// Remove Background's two ways of working: Apple's own subject mask on its own, or that mask refined against the
+/// layer's detail, which recovers hair and fur but takes longer.
+nonisolated enum BackgroundQuality: String, CaseIterable, Sendable {
+    case basic = "Basic"
+    case advanced = "Advanced"
+}
+
 /// Every filter's settings; each filter reads only its own.
 nonisolated struct FilterSettings: Equatable, Sendable {
     /// Gaussian Blur radius in layer pixels (the blur's standard deviation), 0.1–250.
@@ -41,6 +48,14 @@ nonisolated struct FilterSettings: Equatable, Sendable {
     var exposure = ExposureSettings()
     var gradientMap = GradientMapSettings()
     var grain = GrainSettings()
+    /// Remove Background: Basic is the quick subject mask; Advanced refines it (see the three settings below).
+    var backgroundQuality: BackgroundQuality = .basic
+    /// Remove Background: how far the mask is pulled onto the image's own edges (0 off, in layer pixels).
+    var refineEdges: Double = 12
+    /// Remove Background: pushes the mask's grays toward black and white, 0–100, clearing haze in thin areas.
+    var matteContrast: Double = 25
+    /// Remove Background: contracts (negative) or expands (positive) the mask edge, in layer pixels.
+    var shiftEdge: Double = 0
     var normalized: Self {
         func clamp(_ value: Double, _ range: ClosedRange<Double>, _ fallback: Double) -> Double {
             value.isFinite ? min(range.upperBound, max(range.lowerBound, value)) : fallback
@@ -51,6 +66,9 @@ nonisolated struct FilterSettings: Equatable, Sendable {
         result.distance = clamp(distance, 1...2000, 10)
         result.amount = clamp(amount, 0.1...400, 10)
         result.distortion = clamp(distortion, -100...100, 0)
+        result.refineEdges = clamp(refineEdges, 0...40, 12)
+        result.matteContrast = clamp(matteContrast, 0...100, 25)
+        result.shiftEdge = clamp(shiftEdge, -10...10, 0)
         result.exposure = exposure.normalized
         result.gradientMap = gradientMap.normalized
         result.grain = grain.normalized
@@ -115,7 +133,7 @@ nonisolated enum PixelFilter {
         // Grain sits in layer pixels; the job's seed gives each application its own pattern.
         case .grain: image = try settings.grain.apply(job.image, unitsPerPixel: 1 / job.scale, seed: job.seed)
         case .removeBackground:
-            image = try SubjectRemoval.run(job.image)
+            image = try SubjectRemoval.run(job.image, settings: settings)
         case .contentAwareFill:
             image = try ContentFill.run(job)
         case .gaussianBlur:
@@ -178,6 +196,8 @@ final class FilterEdit {
     /// Add Noise's grain, fixed while the panel is open so changing Amount doesn't reshuffle it.
     let seed = UInt32.random(in: .min ... .max)
     @ObservationIgnored var preparedPreview: CGImage?
+    /// The settings `preparedPreview` was made with, for the automatic filters that have settings of their own.
+    @ObservationIgnored var preparedSettings: FilterSettings?
     @ObservationIgnored var pending: FilterJob?
     @ObservationIgnored var previewTask: Task<Void, Never>?
     /// Previews render from a copy no larger than this on its longest side.
@@ -314,7 +334,7 @@ extension EditorSession {
             catch { brushError = error.localizedDescription }
         }
         if previewAdjustmentEditing(preview: preview) { return }
-        if edit.kind.isAutomatic, edit.preparedPreview != nil { brushRevision += 1; return }
+        if edit.kind.isAutomatic, edit.preparedPreview != nil, edit.preparedSettings == edit.settings { brushRevision += 1; return }
         guard preview else {
             edit.pending = nil; edit.preparedPreview = nil; brushRevision += 1
             return
@@ -339,7 +359,7 @@ extension EditorSession {
             edit.previewTask = nil
             edit.preparing = false
             edit.previewError = result.1
-            if edit.preview || edit.kind.isAutomatic { edit.preparedPreview = result.0; self.brushRevision += 1 }
+            if edit.preview || edit.kind.isAutomatic { edit.preparedPreview = result.0; edit.preparedSettings = job.settings; self.brushRevision += 1 }
             self.renderFilterPreview(edit)
         }
     }
@@ -361,6 +381,7 @@ extension EditorSession {
         if edit.kind.isAutomatic {
             await edit.previewTask?.value
             guard filterEdit === edit, !edit.committing, edit.preparedPreview != nil, edit.previewError == nil else { return }
+            // Remove Background masks from the full-size image, so a preview made at preview size is fine to discard.
         }
         // No distortion to remove: close as Cancel does, without an undo step.
         if (edit.kind == .lensCorrection && edit.settings.distortion == 0)
@@ -372,9 +393,12 @@ extension EditorSession {
         isProjectBusy = true
         // The preview stays up until the result is on the layer, so the canvas never flashes the original.
         defer { filterEdit = nil; isProjectBusy = false; brushRevision += 1 }
+        // Remove Background masks the background out rather than erasing it, so it can be brought back at any time
+        // by painting the mask, disabling it, or deleting it.
+        if edit.kind == .removeBackground { await commitBackgroundMask(edit); return }
         let job = FilterJob(kind: edit.kind, image: edit.grownImage ?? edit.original.image, settings: edit.settings, scale: 1,
                             selection: edit.selection, mapping: edit.mapping, seed: edit.seed)
-        let cached = edit.kind.isAutomatic ? edit.preparedPreview : nil
+        let cached = edit.kind.isAutomatic && edit.preparedSettings == edit.settings ? edit.preparedPreview : nil
         do {
             let grown = edit.grownTransform
             let spreads = edit.kind == .gaussianBlur || edit.kind == .motionBlur
@@ -406,6 +430,43 @@ extension EditorSession {
             document?.layers[index] = ImageLayer(id: current.id, asset: asset, name: current.name, isVisible: current.isVisible,
                 transform: made.transform ?? current.transform, parentID: current.parentID, isGroup: false,
                 opacity: current.opacity, blendMode: current.blendMode, mask: mask, maskSourceID: current.maskSourceID)
+            endEdit()
+        } catch { brushError = error.localizedDescription }
+    }
+
+    /// Remove Background as a layer mask: the subject stays white, the background black. A mask already on the layer
+    /// (in the layer's own grid) is kept, hiding whatever either one hides; with a selection, only the selected part
+    /// of the mask changes.
+    private func commitBackgroundMask(_ edit: FilterEdit) async {
+        let source = edit.original.image
+        let current = document?.layers.first(where: { $0.id == edit.layerID })
+        let existing = current?.mask.flatMap { owned in
+            owned.placement == nil && owned.asset.image.width == source.width && owned.asset.image.height == source.height
+                ? owned.asset.image : nil
+        }
+        let selection = edit.selection, mapping = edit.mapping, settings = edit.settings.normalized
+        do {
+            let made = try await Task.detached(priority: .userInitiated) { () -> CGImage in
+                var mask = try SubjectRemoval.subjectMask(source, under: existing, settings: settings)
+                if let selection, let base = existing {
+                    mask = try PixelAdjust.blend(mask, over: base, through: selection, pixelToDocument: mapping, isMask: true)
+                } else if let selection {
+                    let white = try BrushRaster.context(width: source.width, height: source.height, mask: true)
+                    white.setFillColor(gray: 1, alpha: 1)
+                    white.fill(CGRect(x: 0, y: 0, width: source.width, height: source.height))
+                    guard let opaque = white.makeImage() else { throw ExportError.render }
+                    mask = try PixelAdjust.blend(mask, over: opaque, through: selection, pixelToDocument: mapping, isMask: true)
+                }
+                return mask
+            }.value
+            guard let index = document?.layers.firstIndex(where: { $0.id == edit.layerID }),
+                  let layer = document?.layers[index], layer.asset?.image === edit.original.image,
+                  layer.transform == edit.transform else { return }
+            let asset = try LayerMask.asset(from: made)
+            beginEdit(edit.kind.rawValue)
+            document?.layers[index].mask = layer.mask.map { $0.replacing(asset) } ?? LayerMask(asset: asset)
+            document?.layers[index].mask?.isEnabled = true
+            isMaskSelected = true
             endEdit()
         } catch { brushError = error.localizedDescription }
     }
