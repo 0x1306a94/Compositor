@@ -67,7 +67,7 @@ final class WarpStroke {
             return
         }
         let distance = hypot(point.x - from.x, point.y - from.y)
-        let spacing = max(1, diameter * (mode == .smudge ? 0.08 : 0.05))
+        let spacing = max(1, diameter * (mode == .smudge ? 0.08 : 0.025))
         guard distance >= spacing else { return }
         let steps = Int((distance / spacing).rounded(.up))
         var previous = from

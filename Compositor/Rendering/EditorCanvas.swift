@@ -34,8 +34,13 @@ final class CanvasView: NSView {
     }
     private let brushCursor = BrushCursorOverlay()
     private var lastDragPoint: CGPoint?
-    /// Where the brush stroke in progress started, for Shift to keep it on one axis.
+    /// Where Shift was last pressed in the stroke in progress (or where the stroke started, if it was held then):
+    /// the line the stroke is kept on while Shift stays down.
     private var brushAxisAnchor: CGPoint?
+    /// The axis that line runs along, chosen by which way the stroke first moves once Shift is down.
+    private var brushAxisHorizontal: Bool?
+    /// Where the stroke last went, so pressing Shift mid-stroke locks from there rather than from its start.
+    private var brushLastPixel: CGPoint?
     private var transformDrag: TransformDrag? {
         didSet { if transformDrag == nil { releaseDragCursor() } }
     }
@@ -1180,7 +1185,9 @@ final class CanvasView: NSView {
             } else {
                 session.beginBrush(at: pixel)
             }
-            brushAxisAnchor = pixel
+            brushAxisAnchor = event.modifierFlags.contains(.shift) ? pixel : nil
+            brushAxisHorizontal = nil
+            brushLastPixel = pixel
             synchronizeDisplay()
         } else if session.tool.isSelectionTool {
             lassoMouseDown(at: point, event: event)
@@ -1252,11 +1259,24 @@ final class CanvasView: NSView {
         updateBrushCursor()
         if session.brushStroke != nil || session.warpStroke != nil, !session.isProjectBusy, let document = session.document {
             var pixel = session.viewport.documentPoint(from: point, documentSize: document.size)
-            // Shift keeps the stroke straight: along the row or column it set out on.
-            if event.modifierFlags.contains(.shift), let anchor = brushAxisAnchor {
-                pixel = abs(pixel.x - anchor.x) >= abs(pixel.y - anchor.y)
-                    ? CGPoint(x: pixel.x, y: anchor.y) : CGPoint(x: anchor.x, y: pixel.y)
+            // Shift keeps the stroke straight, horizontal or vertical, from wherever it was pressed; letting go carries
+            // on freehand. The axis is settled by the first few pixels of movement, so it doesn't flip mid-line.
+            if event.modifierFlags.contains(.shift) {
+                let anchor = brushAxisAnchor ?? brushLastPixel ?? pixel
+                if brushAxisAnchor == nil { brushAxisAnchor = anchor; brushAxisHorizontal = nil }
+                if brushAxisHorizontal == nil, hypot(pixel.x - anchor.x, pixel.y - anchor.y) >= 3 {
+                    brushAxisHorizontal = abs(pixel.x - anchor.x) >= abs(pixel.y - anchor.y)
+                }
+                if let horizontal = brushAxisHorizontal {
+                    pixel = horizontal ? CGPoint(x: pixel.x, y: anchor.y) : CGPoint(x: anchor.x, y: pixel.y)
+                } else {
+                    pixel = anchor
+                }
+            } else {
+                brushAxisAnchor = nil
+                brushAxisHorizontal = nil
             }
+            brushLastPixel = pixel
             session.continueBrush(at: pixel)
             synchronizeDisplay()
             return
