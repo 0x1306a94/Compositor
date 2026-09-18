@@ -4,12 +4,12 @@
     <title>Compositor</title>
     <item>
       <title>Version 1.0.4</title>
-      <pubDate>Fri, 18 Sep 2026 03:58:46 +0000</pubDate>
+      <pubDate>Fri, 18 Sep 2026 04:09:17 +0000</pubDate>
       <sparkle:version>5</sparkle:version>
       <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
       <link>https://github.com/robbietilton/Compositor/releases/tag/v1.0.4</link>
-      <enclosure url="https://github.com/robbietilton/Compositor/releases/download/v1.0.4/Compositor.dmg" sparkle:edSignature="wpybjubN+2FpLn6irnp4WV+YTIgbW47GnvUrBUQqfMs3yMwUt4EsRseX5o6713TrrzyD+9rjiQubQj0XsVISCw==" length="7390739" type="application/octet-stream"/>
+      <enclosure url="https://github.com/robbietilton/Compositor/releases/download/v1.0.4/Compositor.dmg" sparkle:edSignature="HKCdWdBSYpmu8bIWJNPIe3qeik8bnqrERga7ExJShSfgYVBvPpwxYdJ1AsHFO0KC+QzWtb/Bg8pYSLkvI4UuBA==" length="7391129" type="application/octet-stream"/>
     </item>
   </channel>
 </rss>
