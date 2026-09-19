@@ -5,6 +5,8 @@ import Vision
 nonisolated struct ObjectSelectionSettings: Equatable, Sendable {
     /// Read the visible composite rather than just the active layer.
     var sampleAllLayers = true
+    /// Positive values erode the detected mask inward; negative values expand it outward.
+    var edgeOffset = 0
 }
 
 /// Selects the foreground object under a clicked point using Vision's instance mask,
@@ -24,16 +26,16 @@ nonisolated enum ObjectSelection {
 
     /// The outline, in the image's top-left pixel coordinates, of the foreground object
     /// at `point`. Nil when the point is outside the image, on background, or no object is found.
-    static func select(in image: CGImage, at point: CGPoint, smoothEdges: Bool) throws -> CGPath? {
+    static func select(in image: CGImage, at point: CGPoint, edgeOffset: Int, smoothEdges: Bool) throws -> CGPath? {
         let width = image.width, height = image.height
         let x = Int(point.x.rounded(.down)), y = Int(point.y.rounded(.down))
         guard point.x.isFinite, point.y.isFinite, (0..<width).contains(x), (0..<height).contains(y) else { return nil }
         guard #available(macOS 14.0, *) else { throw Failure.unsupported }
-        return try selectAvailable(in: image, at: point, smoothEdges: smoothEdges)
+        return try selectAvailable(in: image, at: point, edgeOffset: edgeOffset, smoothEdges: smoothEdges)
     }
 
     @available(macOS 14.0, *)
-    private static func selectAvailable(in image: CGImage, at point: CGPoint, smoothEdges: Bool) throws -> CGPath? {
+    private static func selectAvailable(in image: CGImage, at point: CGPoint, edgeOffset: Int, smoothEdges: Bool) throws -> CGPath? {
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         let request = VNGenerateForegroundInstanceMaskRequest()
         try handler.perform([request])
@@ -41,8 +43,9 @@ nonisolated enum ObjectSelection {
         guard let instance = try instanceIndex(in: observation.instanceMask, at: point,
                                                imageSize: CGSize(width: image.width, height: image.height)),
               observation.allInstances.contains(instance) else { return nil }
-        let scaled = try observation.generateScaledMaskForImage(forInstances: IndexSet(integer: instance), from: handler)
-        let mask = try binaryMask(from: scaled, width: image.width, height: image.height)
+        let coarse = try observation.generateMask(forInstances: IndexSet(integer: instance))
+        let mask = adjusted(binaryMask: try edgePreservedBinaryMask(from: coarse, guide: image, width: image.width, height: image.height),
+                            width: image.width, height: image.height, edgeOffset: edgeOffset)
         guard let outline = try MagicWand.outline(of: mask, width: image.width, height: image.height) else { return nil }
         return smoothEdges ? smoothed(outline) : outline
     }
@@ -61,9 +64,63 @@ nonisolated enum ObjectSelection {
     }
 
     @available(macOS 14.0, *)
-    private static func binaryMask(from pixelBuffer: CVPixelBuffer, width: Int, height: Int) throws -> [UInt8] {
-        let grayscale = try grayscaleBytes(from: pixelBuffer, width: width, height: height, interpolation: .high)
+    private static func edgePreservedBinaryMask(from pixelBuffer: CVPixelBuffer, guide: CGImage, width: Int, height: Int) throws -> [UInt8] {
+        let coarse = CIImage(cvPixelBuffer: pixelBuffer)
+        let guideImage = CIImage(cgImage: guide)
+        let refined: CIImage
+        if let filter = CIFilter(name: "CIEdgePreserveUpsampleFilter") {
+            filter.setValue(guideImage, forKey: kCIInputImageKey)
+            filter.setValue(coarse, forKey: "inputSmallImage")
+            filter.setValue(5, forKey: "inputSpatialSigma")
+            filter.setValue(0.15, forKey: "inputLumaSigma")
+            refined = filter.outputImage ?? coarse
+        } else {
+            refined = coarse
+        }
+        let grayscale = try grayscaleBytes(from: refined, width: width, height: height, interpolation: .high)
         return grayscale.map { $0 >= 128 ? 255 : 0 }
+    }
+
+    private static func adjusted(binaryMask: [UInt8], width: Int, height: Int, edgeOffset: Int) -> [UInt8] {
+        var mask = binaryMask
+        let steps = min(10, abs(edgeOffset))
+        guard steps > 0, width > 0, height > 0 else { return mask }
+        for _ in 0..<steps {
+            mask = edgeOffset > 0 ? eroded(mask, width: width, height: height) : dilated(mask, width: width, height: height)
+        }
+        return mask
+    }
+
+    private static func eroded(_ mask: [UInt8], width: Int, height: Int) -> [UInt8] {
+        var result = mask
+        for y in 0..<height {
+            for x in 0..<width where mask[y * width + x] != 0 {
+                var keep = true
+                for ny in max(0, y - 1)...min(height - 1, y + 1) {
+                    for nx in max(0, x - 1)...min(width - 1, x + 1) where mask[ny * width + nx] == 0 {
+                        keep = false
+                    }
+                }
+                result[y * width + x] = keep ? 255 : 0
+            }
+        }
+        return result
+    }
+
+    private static func dilated(_ mask: [UInt8], width: Int, height: Int) -> [UInt8] {
+        var result = mask
+        for y in 0..<height {
+            for x in 0..<width where mask[y * width + x] == 0 {
+                var fill = false
+                for ny in max(0, y - 1)...min(height - 1, y + 1) {
+                    for nx in max(0, x - 1)...min(width - 1, x + 1) where mask[ny * width + nx] != 0 {
+                        fill = true
+                    }
+                }
+                if fill { result[y * width + x] = 255 }
+            }
+        }
+        return result
     }
 
     /// Rounds off the one-pixel stair steps created by tracing a binary mask. The winding and
@@ -170,7 +227,12 @@ nonisolated enum ObjectSelection {
     @available(macOS 14.0, *)
     private static func grayscaleBytes(from pixelBuffer: CVPixelBuffer, width: Int, height: Int,
                                        interpolation: CGInterpolationQuality) throws -> [UInt8] {
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        try grayscaleBytes(from: CIImage(cvPixelBuffer: pixelBuffer), width: width, height: height, interpolation: interpolation)
+    }
+
+    @available(macOS 14.0, *)
+    private static func grayscaleBytes(from image: CIImage, width: Int, height: Int,
+                                       interpolation: CGInterpolationQuality) throws -> [UInt8] {
         let renderer = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
         guard let cgImage = renderer.createCGImage(image, from: image.extent) else { throw Failure.render }
         let context = try BrushRaster.context(width: width, height: height, mask: true)
@@ -196,6 +258,7 @@ nonisolated enum ObjectSelection {
 private nonisolated struct ObjectSelectionJob: @unchecked Sendable {
     let image: CGImage
     let point: CGPoint
+    let edgeOffset: Int
     let smoothEdges: Bool
 }
 
@@ -211,10 +274,12 @@ extension EditorSession {
         guard canEditSelection, !isProjectBusy, selectionMoveOrigin == nil, let document,
               point.x >= 0, point.y >= 0, point.x < document.size.width, point.y < document.size.height,
               let sample = selectionSample(document, sampleAllLayers: objectSelectionSettings.sampleAllLayers) else { return }
-        let job = ObjectSelectionJob(image: sample, point: point, smoothEdges: selectionAntialiased)
+        let job = ObjectSelectionJob(image: sample, point: point,
+                                     edgeOffset: min(10, max(-10, objectSelectionSettings.edgeOffset)),
+                                     smoothEdges: selectionAntialiased)
         isProjectBusy = true
         let result = await Task.detached(priority: .userInitiated) { () -> ObjectSelectionResult in
-            do { return ObjectSelectionResult(path: try ObjectSelection.select(in: job.image, at: job.point, smoothEdges: job.smoothEdges), error: nil) }
+            do { return ObjectSelectionResult(path: try ObjectSelection.select(in: job.image, at: job.point, edgeOffset: job.edgeOffset, smoothEdges: job.smoothEdges), error: nil) }
             catch { return ObjectSelectionResult(path: nil, error: error) }
         }.value
         isProjectBusy = false

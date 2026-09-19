@@ -88,12 +88,26 @@ struct LassoControls: View {
     }
 
     private var objectSelectionControls: some View {
-        Picker("Sample", selection: $session.objectSelectionSettings.sampleAllLayers) {
-            Text("This Layer").tag(false)
-            Text("All Layers").tag(true)
+        HStack(spacing: 12) {
+            Picker("Sample", selection: $session.objectSelectionSettings.sampleAllLayers) {
+                Text("This Layer").tag(false)
+                Text("All Layers").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .help("Analyze the active layer only, or every visible layer as shown")
+            HStack(spacing: 6) {
+                Text("Edge")
+                TextField("Edge", value: Binding(get: { session.objectSelectionSettings.edgeOffset },
+                                                 set: { session.objectSelectionSettings.edgeOffset = min(10, max(-10, $0)) }),
+                          format: .number)
+                    .frame(width: 40).textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .arrowSteps(value: { Double(session.objectSelectionSettings.edgeOffset) },
+                                change: { session.objectSelectionSettings.edgeOffset = Int(min(10, max(-10, $0.rounded()))) })
+                    .unitSuffix("px")
+            }
+            .help("Positive values tighten the detected mask inward; negative values expand it outward")
         }
-        .pickerStyle(.segmented).labelsHidden().fixedSize()
-        .help("Analyze the active layer only, or every visible layer as shown")
     }
 
     /// A button plus its pixel amount (1–500, default 1); both disabled without a selection.
