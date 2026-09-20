@@ -215,7 +215,7 @@ final class EditorSession {
     var lassoDraft: LassoDraft?
     var lassoKind = LassoKind.freehand
     var marqueeKind = LassoKind.rectangle
-    var textDraft: TextDraft? { didSet { resumeFileRequests() } }
+    var textDraft: TextDraft? { didSet { if oldValue != nil && textDraft == nil { resumeFileRequests() } } }
     var textDefaults = LayerTextStyle()
     var shapeKind = ShapeKind.rectangle
     /// Corner radius in pixels for rectangles the Shape tool draws; 0 keeps the corners square.
