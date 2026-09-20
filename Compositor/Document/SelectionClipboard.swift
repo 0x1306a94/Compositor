@@ -15,7 +15,7 @@ extension EditorSession {
     func selectionCopyRegion() -> CGRect? {
         guard let document else { return nil }
         let canvas = CGRect(origin: .zero, size: document.size)
-        let bounds = selection?.path.boundingBoxOfPath ?? canvas
+        let bounds = selection?.coverageBounds ?? canvas
         let tolerance: CGFloat = 0.001
         let minX = floor(bounds.minX + tolerance), minY = floor(bounds.minY + tolerance)
         let region = CGRect(x: minX, y: minY, width: ceil(bounds.maxX - tolerance) - minX,

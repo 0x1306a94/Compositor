@@ -168,14 +168,19 @@ struct CompositorApp: App {
                         if let id = session.activeLayerID { session.loadLayerSelection(layerID: id) }
                     }
                         .disabled(session.activeLayer?.asset == nil || !session.canEditSelection)
+                    Button("Subject") { Task { await session.selectSubject() } }
+                        .keyboardShortcut("a", modifiers: [.command, .option])
+                        .disabled(!session.canSelectSubject)
                     Button("Mask's Black Areas") {
                         if let id = session.activeLayerID { session.loadMaskSelection(layerID: id) }
                     }
                         .disabled(session.activeLayer?.mask == nil || !session.canEditSelection)
                     Divider()
-                    Button("Expand by \(session.selectionExpandAmount) px") { session.expandSelection(by: session.selectionExpandAmount) }
+                    Button("Expand…") { session.promptSelectionAmount(.expand) }
                         .disabled(!session.canModifySelection)
-                    Button("Contract by \(session.selectionContractAmount) px") { session.contractSelection(by: session.selectionContractAmount) }
+                    Button("Contract…") { session.promptSelectionAmount(.contract) }
+                        .disabled(!session.canModifySelection)
+                    Button("Feather…") { session.promptSelectionAmount(.feather) }
                         .disabled(!session.canModifySelection)
                 }
                 CommandMenu("Image") {

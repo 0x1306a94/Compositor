@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var canvasFrame: CGRect = .zero
     @State private var levelsPanel = FloatingPanelController(name: "levelsPanel")
     @State private var adjustmentPanel = FloatingPanelController(name: "adjustmentPanel")
+    @State private var selectionAmountPanel = FloatingPanelController(name: "selectionAmountPanel")
     @State private var filterPanel = FloatingPanelController(name: "filterPanel")
     @State private var effectsPanel = FloatingPanelController(name: "effectsPanel")
     @State private var isDropTargeted = false
@@ -185,6 +186,13 @@ struct ContentView: View {
                 session.effectsEditing = nil
                 session.effectsEditingOriginal = nil
             }
+        }
+        .onChange(of: session.selectionAmountOperation) { _, operation in
+            if let operation {
+                selectionAmountPanel.onClose = { session.selectionAmountOperation = nil }
+                selectionAmountPanel.show(title: operation.rawValue + " Selection",
+                    content: SelectionAmountSheet(session: session, operation: operation))
+            } else { selectionAmountPanel.close() }
         }
         .onChange(of: session.filterEdit == nil) { _, closed in
             if closed { filterPanel.close() }

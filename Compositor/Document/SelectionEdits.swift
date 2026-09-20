@@ -19,7 +19,7 @@ final class PixelMove {
     var movedSelection: DocumentSelection {
         var shift = CGAffineTransform(translationX: offset.width, y: offset.height)
         guard let path = origin.path.copy(using: &shift) else { return origin }
-        return DocumentSelection(path: path, antialiased: origin.antialiased)
+        return DocumentSelection(path: path, antialiased: origin.antialiased, feather: origin.feather)
     }
     init(raster: BrushStroke, origin: DocumentSelection, duplicate: Bool = false) {
         self.raster = raster
@@ -166,7 +166,7 @@ extension EditorSession {
         // While transforming selected pixels the outline follows the handles.
         if let edit = transformEdit, var matrix = floatingSelectionTransform(edit), let selection,
            let path = selection.path.copy(using: &matrix) {
-            return DocumentSelection(path: path, antialiased: selection.antialiased)
+            return DocumentSelection(path: path, antialiased: selection.antialiased, feather: selection.feather)
         }
         return selection
     }
