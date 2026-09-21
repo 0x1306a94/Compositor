@@ -186,6 +186,10 @@ final class EditorSession {
     }
     /// Where the last brush stroke ended, so a Shift-click paints a straight line on from it.
     @ObservationIgnored var lastBrushPoint: (point: CGPoint, layerID: UUID, mask: Bool)?
+    /// Where the brush is while Smoothing trails it behind the pointer (see `smoothed`).
+    @ObservationIgnored var brushAnchor: CGPoint?
+    /// The pointer itself, so a smoothed stroke can catch up to it when the button is released.
+    @ObservationIgnored var brushPointer: CGPoint?
     @ObservationIgnored var maskDistortPreviewCache: MaskDistortPreviewCache?
     /// The last rounded rectangle drawn for a transform in progress, by layer, with the size it was drawn at.
     @ObservationIgnored var shapeTransformPreviewCache: [UUID: (size: CGSize, image: CGImage)] = [:]
