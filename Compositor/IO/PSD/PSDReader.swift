@@ -1,9 +1,11 @@
 import CoreGraphics
 import Foundation
 
-/// Reads Photoshop `.psd` files from Adobe’s published File Formats specification
-/// (8BPS header, layer records, PackBits, additional layer info). This is original
-/// code, not adapted from GIMP, psd-tools, or other GPL-licensed readers.
+/// Reads Photoshop `.psd` files from Adobe’s *Photoshop File Formats Specification*
+/// (2019 HTML edition: File Header, Color Mode Data, Image Resources, Layer and
+/// Mask Information, Image Data). Original implementation of the 8BPS header,
+/// layer records, PackBits, and additional layer info. Not copied, transcribed,
+/// or adapted from GIMP, psd-tools, or any other GPL-licensed PSD reader.
 nonisolated enum PSDReader {
     static func matches(_ url: URL) -> Bool {
         matches(magicOf: url)

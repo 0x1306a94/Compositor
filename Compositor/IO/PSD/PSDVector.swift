@@ -1,7 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// Rasterizes Photoshop vector masks (`vmsk`) and maps fill rectangles/ellipses onto live shape layers.
+/// Rasterizes Photoshop vector masks (`vmsk`/`vsms`) and maps fill rectangles/ellipses
+/// onto live shape layers, from Adobe’s 2019 Photoshop File Formats Specification
+/// (additional layer information: `vmsk`, `vogk`, `SoCo`, `vstk`).
 nonisolated enum PSDVector {
     struct Raster {
         var image: CGImage

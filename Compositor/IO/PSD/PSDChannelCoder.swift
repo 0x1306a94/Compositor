@@ -1,6 +1,8 @@
 import CoreGraphics
 import Foundation
 
+/// PackBits and planar RGB(A) for Photoshop layer channels, from Adobe’s 2019
+/// Photoshop File Formats Specification (Image Data, compression 0 and 1).
 nonisolated enum PSDChannelCoder {
     static func decode(compression: Int, width: Int, height: Int, data: Data) throws -> [UInt8] {
         guard width > 0, height > 0 else { return [] }
