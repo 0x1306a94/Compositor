@@ -1581,11 +1581,11 @@ final class CanvasView: NSView {
             selectionDragStart = nil
             let moved = session.selectionMoveOrigin != session.selection
             session.endSelectionMove()
-            if !moved, session.tool == .wand {
+            if !moved, session.tool == .wand, session.wandMode == .object {
+                Task { await session.selectObject(at: start, mode: .replace); synchronizeDisplay(); refreshLassoCursor() }
+            } else if !moved, session.tool == .wand {
                 // The wand's click inside the selection selects afresh from that pixel.
                 Task { await session.magicWand(at: start, mode: .replace); synchronizeDisplay(); refreshLassoCursor() }
-            } else if !moved, session.tool == .wand, session.wandMode == .object {
-                Task { await session.selectObject(at: start, mode: .replace); synchronizeDisplay(); refreshLassoCursor() }
             } else if !moved {
                 // A click without a drag deselects, as anywhere else with the lasso.
                 session.deselect()
@@ -1862,12 +1862,12 @@ final class CanvasView: NSView {
                 Self.moveSelectionCursor.set()
                 return
             }
-            if session.tool == .wand {
-                Task { await session.magicWand(at: pixel, mode: mode); synchronizeDisplay(); refreshLassoCursor() }
-                return
-            }
             if session.tool == .wand, session.wandMode == .object {
                 Task { await session.selectObject(at: pixel, mode: mode); synchronizeDisplay(); refreshLassoCursor() }
+                return
+            }
+            if session.tool == .wand {
+                Task { await session.magicWand(at: pixel, mode: mode); synchronizeDisplay(); refreshLassoCursor() }
                 return
             }
             session.beginLasso(at: pixel, mode: mode)
