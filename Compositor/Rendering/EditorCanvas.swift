@@ -42,6 +42,8 @@ final class CanvasView: NSView {
     }
     private let brushCursor = BrushCursorOverlay()
     private var lastDragPoint: CGPoint?
+    /// Where a middle-button pan last was (see otherMouseDown).
+    private var middlePanPoint: CGPoint?
     /// Where Shift was last pressed in the stroke in progress (or where the stroke started, if it was held then):
     /// the line the stroke is kept on while Shift stays down.
     private var brushAxisAnchor: CGPoint?
@@ -1119,7 +1121,7 @@ final class CanvasView: NSView {
         hoverTrackingArea = area
     }
     private func updateBrushCursor() {
-        let shows = session.tool.isBrushTool && !spaceHeld && !picking
+        let shows = session.tool.isBrushTool && !spaceHeld && !picking && middlePanPoint == nil
         let diameter = session.brushStroke?.settings.diameter ?? session.brushSettings.diameter
         // Clone Stamp also marks where it is copying from and, between strokes, previews inside
         // the circle what a click would stamp there.
@@ -1543,6 +1545,31 @@ final class CanvasView: NSView {
         session.viewport.translate(by: CGSize(width: point.x - last.x, height: point.y - last.y))
         lastDragPoint = point
         redrawRulers()
+    }
+    /// The middle button pans from any tool, without reaching for Space or the Hand tool. It keeps
+    /// its own drag point so it can't disturb whatever the left button is in the middle of.
+    private func panPoint(of event: NSEvent) -> CGPoint { convert(event.locationInWindow, from: nil) }
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2, session.document != nil else { super.otherMouseDown(with: event); return }
+        middlePanPoint = panPoint(of: event)
+        if session.tool.isBrushTool { updateBrushCursor() }
+        NSCursor.closedHand.set()
+    }
+    override func otherMouseDragged(with event: NSEvent) {
+        guard let last = middlePanPoint else { super.otherMouseDragged(with: event); return }
+        let point = panPoint(of: event)
+        session.viewport.translate(by: CGSize(width: point.x - last.x, height: point.y - last.y))
+        middlePanPoint = point
+        redrawRulers()
+    }
+    override func otherMouseUp(with event: NSEvent) {
+        guard middlePanPoint != nil else { super.otherMouseUp(with: event); return }
+        middlePanPoint = nil
+        // The closed hand was set directly, so put the tool's own cursor back rather than waiting
+        // for the next move.
+        refreshLassoCursor(event.modifierFlags)
+        if session.tool.isBrushTool { updateBrushCursor() }
+        window?.invalidateCursorRects(for: self)
     }
     override func mouseUp(with event: NSEvent) {
         if textBoxAnchor != nil { finishTextGesture(); return }
