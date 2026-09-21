@@ -186,10 +186,7 @@ final class TransformOverlay: NSView {
             path.move(to: geometry.handles[1])
             path.addLine(to: geometry.rotationHandle)
         }
-        context.addPath(path)
-        context.setStrokeColor(NSColor.black.withAlphaComponent(0.7).cgColor)
-        context.setLineWidth(3)
-        context.strokePath()
+        // Just the accent line: a dark line behind it read as a grey halo around the box.
         context.addPath(path)
         context.setStrokeColor(NSColor.controlAccentColor.cgColor)
         context.setLineWidth(1)

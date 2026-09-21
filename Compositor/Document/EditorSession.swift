@@ -362,15 +362,15 @@ final class EditorSession {
         guard value.isValid, transformEdit != nil else { return }
         transformEdit?.draft = value
     }
-    /// Option-drag duplicates what is selected and drags the copies. A folder has no pixels of its own to copy, so
-    /// a folder selection just moves.
+    /// Option-drag duplicates selected roots with their descendants and drags the copies.
     func beginDuplicateTransform() {
         guard transformDuplicate == nil, let primary = activeLayerID else { return }
         commitTransform()
         guard canTransform else { return }
         let selection = selectedLayerIDs
         // Bottom to top, so the copies keep the order they had.
-        let targets = (document?.layers ?? []).filter { selection.contains($0.id) && !$0.isGroup }.map(\.id)
+        let carried = selection.reduce(into: Set<UUID>()) { $0.formUnion(descendantIDs(of: $1)) }
+        let targets = (document?.layers ?? []).filter { selection.contains($0.id) && !carried.contains($0.id) }.map(\.id)
         guard !targets.isEmpty else { return }
         beginEdit(targets.count > 1 ? "Duplicate Layers" : "Duplicate Layer")
         var copies: [UUID] = []
@@ -431,7 +431,9 @@ final class EditorSession {
         guard let edit = transformEdit else { return }
         transformEdit = nil
         if let duplicate = transformDuplicate {
-            document?.layers.removeAll { duplicate.copies.contains($0.id) }
+            let removed = duplicate.copies.reduce(into: Set(duplicate.copies)) { $0.formUnion(descendantIDs(of: $1)) }
+            document?.layers.removeAll { removed.contains($0.id) }
+            collapsedGroupIDs.subtract(removed)
             selectLayers(duplicate.source, primary: duplicate.primary)
             transformDuplicate = nil
             endEdit()
