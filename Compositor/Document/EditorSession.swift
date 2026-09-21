@@ -175,6 +175,12 @@ final class EditorSession {
     @ObservationIgnored var distortEffectsCache: [UUID: DistortEffectsCache] = [:]
     /// Document positions a move has just snapped to, drawn as guides while it lasts.
     @ObservationIgnored var snapGuides: (xs: [CGFloat], ys: [CGFloat]) = ([], [])
+    var snappingEnabled = true {
+        didSet {
+            if !snappingEnabled { snapGuides = ([], []) }
+            refreshCanvasPreview?()
+        }
+    }
     /// Where the last brush stroke ended, so a Shift-click paints a straight line on from it.
     @ObservationIgnored var lastBrushPoint: (point: CGPoint, layerID: UUID, mask: Bool)?
     @ObservationIgnored var maskDistortPreviewCache: MaskDistortPreviewCache?

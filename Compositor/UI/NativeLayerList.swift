@@ -407,6 +407,7 @@ final class LayerTableView: NSTableView {
         super.mouseDown(with: event)
     }
     override func keyDown(with event: NSEvent) {
+        guard let event = ShortcutSettings.shared.canvasEvent(event) else { return }
         let plain = event.modifierFlags.intersection([.command, .control, .option]).isEmpty
         if event.keyCode == 53, session?.transformEdit != nil {
             session?.cancelTransform()
@@ -418,6 +419,8 @@ final class LayerTableView: NSTableView {
             session?.swapPaletteColors()
         } else if plain, event.charactersIgnoringModifiers?.lowercased() == "d" {
             session?.resetPaletteColors()
+        } else if plain, event.charactersIgnoringModifiers?.lowercased() == "t" {
+            session?.selectTool(.type)
         } else if plain, ["a", "v", "h", "z", "b", "e", "g", "l", "m", "w", "j", "s", "u", "r", "i", "c"].contains(event.charactersIgnoringModifiers?.lowercased() ?? "") {
             let key = event.charactersIgnoringModifiers?.lowercased()
             if key == "m" { if !event.isARepeat { session?.pressMarqueeKey() } }
