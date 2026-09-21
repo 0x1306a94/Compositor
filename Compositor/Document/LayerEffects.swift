@@ -93,8 +93,8 @@ nonisolated struct OuterGlowEffect: Codable, Equatable, Sendable {
     var enabled: Bool? = nil
     var isEnabled: Bool { enabled ?? true }
     var size: CGFloat = 20
-    var red: CGFloat = 0
-    var green: CGFloat = 0.94
+    var red: CGFloat = 1
+    var green: CGFloat = 1
     var blue: CGFloat = 1
     var opacity: Double = 0.75
     var color: PaletteColor { PaletteColor(red: red, green: green, blue: blue) }
