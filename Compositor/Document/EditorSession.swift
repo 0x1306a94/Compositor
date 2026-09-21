@@ -511,10 +511,12 @@ final class EditorSession {
     var isImporting = false { didSet { resumeFileRequests() } }
     var importError: String? { didSet { resumeFileRequests() } }
     var showsConversionSheet = false { didSet { resumeFileRequests() } }
-    @ObservationIgnored var conversionRequest: PSDConversionRequest?
+    var conversionRequest: PSDConversionRequest?
     /// Tests assign this to skip the conversion sheet.
     @ObservationIgnored var confirmConversions: (([PSDConversion]) async -> Bool)?
     @ObservationIgnored private var conversionContinuation: CheckedContinuation<Bool, Never>?
+    /// Cancel pressed while a Photoshop file was still being read.
+    @ObservationIgnored private var conversionCancelled = false
     var opacityEditLayerID: UUID?
     var blendPreview: (layerID: UUID, mode: LayerBlendMode)?
     @ObservationIgnored var refreshCanvasPreview: (() -> Void)?
@@ -720,13 +722,17 @@ final class EditorSession {
                     return total + image.width * image.height
                 } ?? 0
                 if PSDReader.matches(url) {
-                    let parsed = try await ImageImporter.shared.loadPhotoshop(url, remainingPixels: 100_000_000 - usedPixels)
-                    let assets = try await ImageImporter.shared.photoshopAssets(parsed)
-                    let imported = try PSDDocumentBuilder.makeImport(parsed, assets: assets)
-                    if !imported.conversions.isEmpty {
-                        let confirmed = await confirmPSDConversions(imported.conversions, title: "Open “\(url.lastPathComponent)”?", confirmTitle: "Import")
-                        if !confirmed { continue }
+                    beginPSDReading(title: "Open “\(url.lastPathComponent)”?", confirmTitle: "Import")
+                    let imported: PSDImport
+                    do {
+                        let parsed = try await ImageImporter.shared.loadPhotoshop(url, remainingPixels: 100_000_000 - usedPixels)
+                        let assets = try await ImageImporter.shared.photoshopAssets(parsed)
+                        imported = try PSDDocumentBuilder.makeImport(parsed, assets: assets)
+                    } catch {
+                        endPSDReading()
+                        throw error
                     }
+                    if !(await finishPSDReading(imported.conversions)) { continue }
                     try insertPhotoshop(imported, named: url.deletingPathExtension().lastPathComponent, centeredAt: point)
                 } else {
                     let asset = try await ImageImporter.shared.decode(url, remainingPixels: 100_000_000 - usedPixels)
@@ -761,6 +767,33 @@ final class EditorSession {
         activeLayerID = layer.id
     }
 
+    /// Puts the sheet up before the file is read, so a big PSD doesn't leave the click unanswered.
+    /// `finishPSDReading` fills it in, or takes it away when there is nothing to report.
+    func beginPSDReading(title: String, confirmTitle: String) {
+        guard confirmConversions == nil else { return }
+        conversionCancelled = false
+        conversionRequest = PSDConversionRequest(title: title, confirmTitle: confirmTitle, conversions: [], isReading: true)
+        showsConversionSheet = true
+    }
+    func finishPSDReading(_ conversions: [PSDConversion]) async -> Bool {
+        if let confirmConversions {
+            if conversions.isEmpty { return true }
+            return await confirmConversions(conversions)
+        }
+        if conversionCancelled { endPSDReading(); return false }
+        guard !conversions.isEmpty else { endPSDReading(); return true }
+        return await withCheckedContinuation { continuation in
+            conversionContinuation = continuation
+            conversionRequest?.conversions = conversions
+            conversionRequest?.isReading = false
+        }
+    }
+    /// Takes the sheet away without an answer: nothing to report, or the read failed.
+    func endPSDReading() {
+        guard conversionContinuation == nil else { return }
+        showsConversionSheet = false
+        conversionRequest = nil
+    }
     func confirmPSDConversions(_ conversions: [PSDConversion], title: String, confirmTitle: String) async -> Bool {
         if let confirmConversions { return await confirmConversions(conversions) }
         return await withCheckedContinuation { continuation in
@@ -771,6 +804,7 @@ final class EditorSession {
     }
 
     func finishConversion(_ confirmed: Bool) {
+        if !confirmed, conversionRequest?.isReading == true { conversionCancelled = true }
         showsConversionSheet = false
         conversionRequest = nil
         let continuation = conversionContinuation
