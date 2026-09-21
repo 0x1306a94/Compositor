@@ -330,7 +330,9 @@ struct SelectionTests {
         #expect(session.selection?.path.boundingBoxOfPath == CGRect(x: 40, y: 45, width: 20, height: 10))
         marquee(session, from: CGPoint(x: 50, y: 50), to: CGPoint(x: 45, y: 58), square: true, fromCenter: true)
         #expect(session.selection?.path.boundingBoxOfPath == CGRect(x: 42, y: 42, width: 16, height: 16))
-        #expect(NavigationTool.marquee.isSelectionTool && NavigationTool.objectSelection.isSelectionTool && !NavigationTool.brush.isSelectionTool)
+        // Object selection is the Magic tool's Object mode now, not a tool of its own (EditorSession: "Tab
+        // switches Wand and Object"), so the tool that carries it is `.wand`. This read `.objectSelection`.
+        #expect(NavigationTool.marquee.isSelectionTool && NavigationTool.wand.isSelectionTool && !NavigationTool.brush.isSelectionTool)
     }
 
     @Test func marqueeEllipseSelectsAnOvalInItsBoxAndShiftMakesACircle() throws {
