@@ -348,6 +348,36 @@ struct PSDRoundTripTests {
         #expect(live.bounds.width >= 99 && live.bounds.height >= 49)
     }
 
+    @Test func hugeOriginationSizeIsRejectedWithoutTrapping() throws {
+        var extra: [String: Data] = [:]
+        extra["vogk"] = originationData(type: 5, rect: CGRect(x: 0, y: 0, width: 1e20, height: 1e20))
+        extra["SoCo"] = solidColor(red: 0, green: 110, blue: 255)
+        extra["vstk"] = strokeStyle(fill: true, stroke: false, width: 1, red: 255, green: 255, blue: 0)
+        #expect(throws: ImageImportError.tooLarge) {
+            try PSDVector.live(extra: extra, canvas: PSDVectorFixtures.canvas)
+        }
+    }
+
+    @Test func nonFiniteOriginationSizeIsIgnored() throws {
+        var extra: [String: Data] = [:]
+        extra["vogk"] = originationData(type: 5, rect: CGRect(x: 10, y: 10, width: CGFloat.infinity, height: 100))
+        extra["SoCo"] = solidColor(red: 0, green: 110, blue: 255)
+        extra["vstk"] = strokeStyle(fill: true, stroke: false, width: 1, red: 255, green: 255, blue: 0)
+        #expect(try PSDVector.live(extra: extra, canvas: PSDVectorFixtures.canvas) == nil)
+    }
+
+    @Test func hugeStrokeWidthIsRejectedWithoutTrapping() throws {
+        var extra: [String: Data] = [:]
+        extra["vmsk"] = vectorMask(canvas: CGSize(width: 200, height: 200), corners: [
+            CGPoint(x: 120, y: 30), CGPoint(x: 120, y: 80), CGPoint(x: 20, y: 80), CGPoint(x: 20, y: 30)
+        ])
+        extra["SoCo"] = solidColor(red: 0, green: 0, blue: 0)
+        extra["vstk"] = strokeStyle(fill: true, stroke: true, width: 1e20, red: 255, green: 255, blue: 0)
+        #expect(throws: ImageImportError.tooLarge) {
+            try PSDVector.raster(extra: extra, canvas: CGSize(width: 200, height: 200))
+        }
+    }
+
     private func originationData(type: UInt32, rect: CGRect, radii: [Double] = []) -> Data {
         var data = Data()
         func append32(_ value: UInt32) {

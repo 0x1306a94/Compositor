@@ -26,15 +26,9 @@ nonisolated enum PSDVector {
             return nil
         }
         var box = origin.bounds.integral
-        guard box.origin.x.isFinite, box.origin.y.isFinite, box.size.width.isFinite, box.size.height.isFinite else {
-            return nil
-        }
-        let width = max(1, Int(box.width)), height = max(1, Int(box.height))
-        guard width <= 30_000, height <= 30_000,
-              width * height <= min(EditorSession.maxShapePixels, max(0, remainingPixels)) else {
-            throw ImageImportError.tooLarge
-        }
-        box.size = CGSize(width: width, height: height)
+        guard box.origin.x.isFinite, box.origin.y.isFinite else { return nil }
+        guard let size = try pixelSize(box.size, remainingPixels: remainingPixels) else { return nil }
+        box.size = CGSize(width: size.width, height: size.height)
         let style = LayerShapeStyle(kind: origin.kind, red: fill.r, green: fill.g, blue: fill.b, cornerRadius: origin.cornerRadius)
         let image = try EditorSession.shapeImage(style.kind, size: box.size, color: style.color, cornerRadius: style.cornerRadius)
         var notes: [String] = []
@@ -55,17 +49,16 @@ nonisolated enum PSDVector {
         let strokeColor = stroke.flatMap(rgb)
         let strokeWidth = stroke.flatMap { unit($0, key: "strokeStyleLineWidth") } ?? 1
         guard fillEnabled && fill != nil || strokeEnabled && strokeColor != nil else { return nil }
+        guard CGFloat(strokeWidth).isFinite else { return nil }
+        if strokeEnabled {
+            guard (0...30_000).contains(strokeWidth) else { throw ImageImportError.tooLarge }
+        }
         var box = path.boundingBoxOfPath
         if strokeEnabled { box = box.insetBy(dx: -ceil(strokeWidth / 2 + 1), dy: -ceil(strokeWidth / 2 + 1)) }
         box = box.integral
-        guard box.origin.x.isFinite, box.origin.y.isFinite, box.size.width.isFinite, box.size.height.isFinite else {
-            return nil
-        }
-        let width = max(1, Int(box.width)), height = max(1, Int(box.height))
-        guard width <= 30_000, height <= 30_000,
-              width * height <= min(EditorSession.maxShapePixels, max(0, remainingPixels)) else {
-            throw ImageImportError.tooLarge
-        }
+        guard box.origin.x.isFinite, box.origin.y.isFinite else { return nil }
+        guard let size = try pixelSize(box.size, remainingPixels: remainingPixels) else { return nil }
+        let width = size.width, height = size.height
         let context = try BrushRaster.context(width: width, height: height, mask: false)
         context.translateBy(x: -box.minX, y: -box.minY)
         context.setShouldAntialias(true)
@@ -86,6 +79,21 @@ nonisolated enum PSDVector {
         }
         guard let image = context.makeImage() else { return nil }
         return Raster(image: image, bounds: CGRect(x: box.minX, y: box.minY, width: CGFloat(width), height: CGFloat(height)))
+    }
+
+    /// Rejects sizes that would trap on `Int(...)` or exceed the 30,000 px / remaining-pixel budget.
+    private static func pixelSize(_ size: CGSize, remainingPixels: Int) throws -> (width: Int, height: Int)? {
+        guard size.width.isFinite, size.height.isFinite else { return nil }
+        let maxDimension: CGFloat = 30_000
+        guard abs(size.width) <= maxDimension, abs(size.height) <= maxDimension else {
+            throw ImageImportError.tooLarge
+        }
+        let budget = min(EditorSession.maxShapePixels, max(0, remainingPixels))
+        guard size.width * size.height <= CGFloat(budget) else { throw ImageImportError.tooLarge }
+        let width = max(1, Int(size.width))
+        let height = max(1, Int(size.height))
+        guard width * height <= budget else { throw ImageImportError.tooLarge }
+        return (width, height)
     }
 
     private struct Origination {
@@ -110,7 +118,9 @@ nonisolated enum PSDVector {
               let right = unit(data, key: "Rght", from: from),
               let bottom = unit(data, key: "Btom", from: from) else { return nil }
         let bounds = CGRect(x: left, y: top, width: right - left, height: bottom - top)
-        guard bounds.width >= 1, bounds.height >= 1, bounds.origin.x.isFinite, bounds.origin.y.isFinite else { return nil }
+        guard bounds.width >= 1, bounds.height >= 1,
+              bounds.origin.x.isFinite, bounds.origin.y.isFinite,
+              bounds.size.width.isFinite, bounds.size.height.isFinite else { return nil }
         var origin = Origination(kind: kind, bounds: bounds)
         if kind == .rectangle, let radiiAt = offset(of: "keyOriginRRectRadii", in: data) {
             let keys = ["topLeft", "topRight", "bottomRight", "bottomLeft"]
