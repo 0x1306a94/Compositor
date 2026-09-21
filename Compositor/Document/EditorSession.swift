@@ -194,8 +194,9 @@ final class EditorSession {
     /// The last rounded rectangle drawn for a transform in progress, by layer, with the size it was drawn at.
     @ObservationIgnored var shapeTransformPreviewCache: [UUID: (size: CGSize, image: CGImage)] = [:]
     var locksTransformRatio = true
-    /// Off by default: a Move-tool press drags the active layer; hold Cmd (or turn this on) to pick the layer under the pointer.
-    var transformAutoSelect = false
+    /// On by default: a Move-tool press selects the layer under the pointer. Turn this off to drag the
+    /// active layer from anywhere; hold Command to pick a layer while it is off.
+    var transformAutoSelect = true
     /// The Move tool's transform box and handles (⌘H). Hidden, a drag anywhere just moves the layer;
     /// a pending ⌘T transform still shows its box.
     var showsTransformControls = true
