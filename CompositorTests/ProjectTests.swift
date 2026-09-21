@@ -64,6 +64,28 @@ struct ProjectTests {
         #expect(!reopened.isModified)
     }
 
+    /// Folders took an opacity of their own in 1.1.6, but project validation still demanded that
+    /// every folder be fully opaque, so a document with a dimmed folder could not be saved at all.
+    @Test func aDimmedFolderSavesAndReopens() async throws {
+        let root = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = EditorSession()
+        await session.importImages([try ImageImportTests().fixture(.png)])
+        let child = try #require(session.activeLayerID)
+        session.selectLayers([child], primary: child)
+        session.addGroup()
+        let folder = try #require(session.activeLayerID)
+        session.selectLayers([folder], primary: folder)
+        session.setLayerOpacity(0.5)
+        #expect(session.document?.layers.first { $0.id == folder }?.opacity == 0.5)
+
+        let url = root.appendingPathComponent("Dimmed.comp")
+        try await ProjectStore.shared.save(try #require(session.projectSnapshot()), to: url)
+        let loaded = try await ProjectStore.shared.load(from: url)
+        let saved = try #require(loaded.manifest.layers.first { $0.isGroup == true })
+        #expect(saved.opacity == 0.5)
+    }
+
     @Test func overwriteReplacesPackageAndDropsRemovedAssets() async throws {
         let root = try temporaryFolder()
         defer { try? FileManager.default.removeItem(at: root) }
