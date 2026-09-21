@@ -321,43 +321,43 @@ final class MetalLayerEffects {
                                 uint2 gid [[thread_position_in_grid]]) {
         if (gid.x >= settings.width || gid.y >= settings.height) { return; }
         uint index = gid.y * settings.width + gid.x;
-        float3 colour = float3(0.0);
+        float3 color = float3(0.0);
         float alpha = 0.0;
         if (settings.flags.z == 1) {
             float coverage = clamp(shadow[index] * settings.shadowColor.w, 0.0, 1.0);
-            colour = settings.shadowColor.xyz * coverage;
+            color = settings.shadowColor.xyz * coverage;
             alpha = coverage;
         }
         if (settings.more.y == 1) {
             float glowCoverage = clamp(glow[index] * (1.0 - shape[index]) * settings.glowColor.w, 0.0, 1.0);
-            colour = settings.glowColor.xyz * glowCoverage + colour * (1.0 - glowCoverage);
+            color = settings.glowColor.xyz * glowCoverage + color * (1.0 - glowCoverage);
             alpha = glowCoverage + alpha * (1.0 - glowCoverage);
         }
         float strokeCoverage = settings.flags.x == 1 ? clamp(ring[index] * settings.strokeColor.w, 0.0, 1.0) : 0.0;
         if (settings.flags.x == 1 && settings.flags.y == 0) {
-            colour = settings.strokeColor.xyz * strokeCoverage + colour * (1.0 - strokeCoverage);
+            color = settings.strokeColor.xyz * strokeCoverage + color * (1.0 - strokeCoverage);
             alpha = strokeCoverage + alpha * (1.0 - strokeCoverage);
         }
         float4 source = float4(pixels[index]) / 255.0;
-        colour = source.xyz + colour * (1.0 - source.w);
+        color = source.xyz + color * (1.0 - source.w);
         alpha = source.w + alpha * (1.0 - source.w);
         if (settings.more.x == 1) {
             float coverage = clamp(shape[index] * settings.overlayColor.w, 0.0, 1.0);
-            colour = settings.overlayColor.xyz * coverage + colour * (1.0 - coverage);
+            color = settings.overlayColor.xyz * coverage + color * (1.0 - coverage);
             alpha = coverage + alpha * (1.0 - coverage);
         }
         if (settings.flags.w == 1) {
             float coverage = clamp(inner[index] * settings.innerColor.w, 0.0, 1.0);
-            colour = settings.innerColor.xyz * coverage + colour * (1.0 - coverage);
+            color = settings.innerColor.xyz * coverage + color * (1.0 - coverage);
             alpha = coverage + alpha * (1.0 - coverage);
         }
         if (settings.flags.x == 1 && settings.flags.y == 1) {
-            colour = settings.strokeColor.xyz * strokeCoverage + colour * (1.0 - strokeCoverage);
+            color = settings.strokeColor.xyz * strokeCoverage + color * (1.0 - strokeCoverage);
             alpha = strokeCoverage + alpha * (1.0 - strokeCoverage);
         }
-        result[index] = uchar4(uchar(clamp(colour.x, 0.0, 1.0) * 255.0 + 0.5),
-                               uchar(clamp(colour.y, 0.0, 1.0) * 255.0 + 0.5),
-                               uchar(clamp(colour.z, 0.0, 1.0) * 255.0 + 0.5),
+        result[index] = uchar4(uchar(clamp(color.x, 0.0, 1.0) * 255.0 + 0.5),
+                               uchar(clamp(color.y, 0.0, 1.0) * 255.0 + 0.5),
+                               uchar(clamp(color.z, 0.0, 1.0) * 255.0 + 0.5),
                                uchar(clamp(alpha, 0.0, 1.0) * 255.0 + 0.5));
     }
     """

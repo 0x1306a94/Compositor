@@ -851,7 +851,7 @@ final class CanvasView: NSView {
             } else if let stroke, !stroke.isMask {
                 // The effects follow the paint: a surface kept at full resolution, redone only where the brush has
                 // just been (see LayerEffectsSurface). It already holds the wet pixels with the effects over them —
-                // a colour overlay and an inner shadow go over the layer, so drawing the paint again on top of it
+                // a color overlay and an inner shadow go over the layer, so drawing the paint again on top of it
                 // would cover them — so nothing more is drawn for this layer.
                 if let surface = strokeSurface(layer: layer, stroke: stroke, mask: mask), let built = surface.image {
                     let grown = LayerEffectsRenderer.placed(transform, image: built, inset: surface.margin)

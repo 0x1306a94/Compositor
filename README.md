@@ -13,7 +13,7 @@ Because it’s open source, you can download the Xcode project and add, remove, 
 - Layer masks: paint, fill, invert, blur and feather them; link or unlink them to transform a mask on its own
 - Clipping masks and folder masks
 - Adjustment layers: Hue/Saturation, Levels, Curves, Exposure, Gradient Map and Grain
-- Layer effects: Stroke, Drop Shadow, Colour Overlay, Inner Shadow and Outer Glow, rendered on the GPU and editable at any time
+- Layer effects: Stroke, Drop Shadow, Color Overlay, Inner Shadow and Outer Glow, rendered on the GPU and editable at any time
 - Merge Down, Merge Layers and Merge Group (⌘E)
 - Duplicate, rename inline, reorder and nest by drag and drop; Option-drag to duplicate
 - Drag layers between open projects
@@ -27,7 +27,7 @@ Because it’s open source, you can download the Xcode project and add, remove, 
 - Flip Layer and Flip Canvas, horizontal and vertical
 
 ### Selections
-- Rectangle and Ellipse Marquee, Freehand and Polygonal Lasso, and the Magic tool — Wand selects by colour, Object traces whatever you click (Tab switches)
+- Rectangle and Ellipse Marquee, Freehand and Polygonal Lasso, and the Magic tool — Wand selects by color, Object traces whatever you click (Tab switches)
 - Select Subject, and Expand, Contract and Feather on any selection
 - Add to and subtract from selections, move the outline, or move and duplicate the pixels inside
 - Load a layer's pixels or a mask as a selection
