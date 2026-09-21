@@ -205,7 +205,9 @@ struct PSDRoundTripTests {
         #expect(imported.layers.first?.blendMode == .softLight)
     }
 
-    @Test func folderOpacityIsReportedBecauseProjectsCannotStoreIt() throws {
+    /// Was folderOpacityIsReportedBecauseProjectsCannotStoreIt, which asserted the folder came in
+    /// fully opaque with a conversion note. Folders took an opacity of their own in 1.1.6.
+    @Test func folderOpacityImportsOntoTheFolder() throws {
         let fill = try colorImage(width: 2, height: 2, red: 0, green: 1, blue: 0)
         let groupID = UUID()
         var group = PSDRecord(id: groupID, name: "Stack")
@@ -217,8 +219,9 @@ struct PSDRoundTripTests {
         let data = try PSDFixture.data(PSDDocument(width: 4, height: 4, resolution: 72, layers: [group, child]), composite: fill)
         let imported = try PSDDocumentBuilder.makeImport(try PSDReader.read(data))
         let folder = try #require(imported.layers.first { $0.isGroup })
-        #expect(folder.opacity == 1)
-        #expect(imported.conversions.contains { $0.layerName == "Stack" && $0.message.contains("opacity") })
+        // Photoshop stores opacity in one byte, so a half-opaque group comes back as 128/255.
+        #expect(abs(folder.opacity - 0.5) < 0.01)
+        #expect(!imported.conversions.contains { $0.layerName == "Stack" && $0.message.contains("opacity") })
     }
 
     @Test func unsupportedHeadersAreRejected() throws {

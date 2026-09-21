@@ -49,9 +49,6 @@ nonisolated enum PSDDocumentBuilder {
                 if record.blendKey != "pass" && record.blendKey != "norm" {
                     notes.append("Folder blend mode “\(record.blendKey)” isn’t supported. The folder will be pass-through.")
                 }
-                if abs(record.opacity - 1) > 0.001 {
-                    notes.append("Folder opacity isn’t supported. The folder will be fully opaque.")
-                }
             } else if record.blendMode == nil, record.blendKey != "pass" {
                 notes.append("Blend mode “\(record.blendKey.trimmingCharacters(in: .whitespaces))” isn’t supported and will be applied as Normal.")
             }
@@ -68,9 +65,11 @@ nonisolated enum PSDDocumentBuilder {
             if record.kind == .adjustment, record.adjustment == nil { continue }
             var layer: ImageLayer
             if record.isGroup {
+                // Folders carry an opacity of their own (1.1.6), which multiplies into what's inside
+                // them just as Photoshop's group opacity does.
                 layer = ImageLayer(id: record.id, asset: nil, name: record.name, isVisible: record.isVisible,
                                    transform: LayerTransform(origin: .zero, size: canvas), parentID: record.parentID,
-                                   isGroup: true)
+                                   isGroup: true, opacity: min(1, max(0, record.opacity)))
             } else if let adjustment = record.adjustment {
                 layer = ImageLayer(id: record.id, asset: nil, name: record.name, isVisible: record.isVisible,
                                    transform: LayerTransform(origin: .zero, size: canvas), parentID: record.parentID,
