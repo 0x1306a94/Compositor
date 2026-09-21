@@ -68,6 +68,45 @@ struct TransformTests {
         #expect(!session.transformAutoSelect)
     }
 
+    @Test func autoSelectPicksForegroundLayerStackedOnSelectedBackground() throws {
+        let session = EditorSession()
+        session.createDocument(width: 400, height: 200)
+        try insertPaintedLayer(into: session)
+        let background = try #require(session.activeLayerID)
+        session.document?.layers[0].transform = LayerTransform(origin: .zero, size: CGSize(width: 400, height: 200))
+        try insertPaintedLayer(into: session)
+        let foreground = try #require(session.activeLayerID)
+        session.document?.layers[1].transform = LayerTransform(origin: CGPoint(x: 150, y: 50), size: CGSize(width: 80, height: 60))
+        session.selectLayer(background)
+        let view = CanvasView(session: session)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view
+        defer { window.contentView = nil }
+        session.viewport.resize(to: view.bounds.size, backingScale: 1, documentSize: session.document?.size)
+        session.zoom(to: 1)
+        func click(_ point: CGPoint) throws {
+            let location = view.convert(session.viewport.viewPoint(from: point, documentSize: CGSize(width: 400, height: 200)), to: nil)
+            let event = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: location,
+                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            view.mouseDown(with: event)
+            view.mouseUp(with: event)
+            session.commitTransform()
+        }
+        session.transformAutoSelect = true
+        try click(CGPoint(x: 180, y: 70))
+        #expect(session.activeLayerID == foreground)
+        try click(CGPoint(x: 20, y: 20))
+        #expect(session.activeLayerID == background)
+        try click(CGPoint(x: 180, y: 70))
+        #expect(session.activeLayerID == foreground)
+        session.selectLayer(background)
+        session.transformAutoSelect = false
+        try click(CGPoint(x: 180, y: 70))
+        #expect(session.activeLayerID == background)
+    }
+
     @Test func hoverRegionsMatchRotatedEdgesCornersAndRotationHandle() {
         var viewport = CanvasViewport()
         let size = CGSize(width: 1000, height: 800)
