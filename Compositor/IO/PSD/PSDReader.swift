@@ -193,6 +193,9 @@ nonisolated enum PSDReader {
         return String(utf16CodeUnits: units, count: count).trimmingCharacters(in: CharacterSet(charactersIn: "\0"))
     }
 
+    /// Transparency, R, G, B, and the user mask. Spot and other extra IDs are skipped before decode.
+    private static let unpackedChannelIDs: Set<Int> = [-1, 0, 1, 2, -2]
+
     private static func decodeChannels(_ cursor: inout PSDCursor, layer: inout RawLayer, remainingPixels: Int) throws {
         var planes: [Int: [UInt8]] = [:]
         let width = max(0, layer.right - layer.left)
@@ -210,10 +213,8 @@ nonisolated enum PSDReader {
         }
         for channel in layer.channels {
             let start = cursor.offset
-            if channel.length < 2 {
-                cursor.offset = start + max(0, channel.length)
-                continue
-            }
+            defer { cursor.offset = start + max(0, channel.length) }
+            guard unpackedChannelIDs.contains(channel.id), channel.length >= 2 else { continue }
             let compression = Int(try cursor.u16())
             let payload = try cursor.bytes(channel.length - 2)
             let isMask = channel.id == -2
@@ -222,7 +223,6 @@ nonisolated enum PSDReader {
             if w > 0, h > 0 {
                 planes[channel.id] = try PSDChannelCoder.decode(compression: compression, width: w, height: h, data: payload)
             }
-            cursor.offset = start + channel.length
         }
         if layer.hasMask, maskWidth > 0, maskHeight > 0, let gray = planes[-2], gray.count >= maskWidth * maskHeight {
             layer.maskImage = try PSDChannelCoder.maskImage(width: maskWidth, height: maskHeight, gray: gray)

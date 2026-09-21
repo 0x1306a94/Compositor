@@ -139,6 +139,36 @@ struct PSDRoundTripTests {
         }
     }
 
+    @Test func unusedSpotChannelsAreSkippedBeforeDecode() throws {
+        let pixels = Data(repeating: 255, count: 4)
+        var channels: [(id: Int16, payload: Data)] = []
+        for id: Int16 in [-1, 0, 1, 2] {
+            channels.append((id, rawChannel(pixels)))
+        }
+        // Compression 99 would throw if these planes were unpacked. 52 extras fill the 56-channel cap.
+        let bogus = Data([0, 99, 0, 0])
+        for id in Int16(3)...Int16(54) {
+            channels.append((id, bogus))
+        }
+        let document = try PSDReader.read(layerFile(layerWidth: 2, layerHeight: 2, channels: channels))
+        #expect(document.layers.count == 1)
+        #expect(document.layers[0].image?.width == 2)
+        #expect(document.layers[0].image?.height == 2)
+    }
+
+    @Test func unsupportedCompressionOnColorChannelsIsStillRejected() {
+        let pixels = Data(repeating: 255, count: 4)
+        let channels: [(id: Int16, payload: Data)] = [
+            (-1, rawChannel(pixels)),
+            (0, Data([0, 99, 0, 0])),
+            (1, rawChannel(pixels)),
+            (2, rawChannel(pixels)),
+        ]
+        #expect(throws: PSDError.unsupportedCompression) {
+            try PSDReader.read(layerFile(layerWidth: 2, layerHeight: 2, channels: channels))
+        }
+    }
+
     @Test func matchesRequiresPhotoshopMagic() throws {
         let jpeg = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).psd")
         try Data([0xFF, 0xD8, 0xFF, 0xE0]).write(to: jpeg)
@@ -436,19 +466,32 @@ struct PSDRoundTripTests {
         return types
     }
 
+    private func rawChannel(_ plane: Data) -> Data {
+        var data = Data([0, 0])
+        data.append(plane)
+        return data
+    }
+
     private func oversizedLayerFile(width: UInt32, height: UInt32, layerWidth: Int32, layerHeight: Int32) -> Data {
-        var data = header(width: width, height: height)
-        func append16(_ value: UInt16) {
-            data.append(UInt8(truncatingIfNeeded: value >> 8))
-            data.append(UInt8(truncatingIfNeeded: value))
-        }
+        layerFile(canvasWidth: width, canvasHeight: height, layerWidth: layerWidth, layerHeight: layerHeight, channels: [
+            (-1, Data([0, 0])), (0, Data([0, 0])), (1, Data([0, 0])), (2, Data([0, 0])),
+        ])
+    }
+
+    private func layerFile(
+        canvasWidth: UInt32 = 8,
+        canvasHeight: UInt32 = 8,
+        layerWidth: Int32,
+        layerHeight: Int32,
+        channels: [(id: Int16, payload: Data)]
+    ) -> Data {
+        var data = header(width: canvasWidth, height: canvasHeight)
         func append32(_ value: UInt32) {
             data.append(UInt8(truncatingIfNeeded: value >> 24))
             data.append(UInt8(truncatingIfNeeded: value >> 16))
             data.append(UInt8(truncatingIfNeeded: value >> 8))
             data.append(UInt8(truncatingIfNeeded: value))
         }
-        func appendI32(_ value: Int32) { append32(UInt32(bitPattern: value)) }
         append32(0)
         append32(0)
         var records = Data()
@@ -469,10 +512,12 @@ struct PSDRoundTripTests {
         recI32(0)
         recI32(layerHeight)
         recI32(layerWidth)
-        rec16(4)
-        for id: Int16 in [-1, 0, 1, 2] {
-            recI16(id)
-            rec32(2)
+        rec16(UInt16(channels.count))
+        var payloads = Data()
+        for channel in channels {
+            recI16(channel.id)
+            rec32(UInt32(channel.payload.count))
+            payloads.append(channel.payload)
         }
         records.append(contentsOf: Array("8BIMnorm".utf8))
         records.append(contentsOf: [255, 0, 0, 0])
@@ -481,7 +526,6 @@ struct PSDRoundTripTests {
         rec32(0)
         records.append(3)
         records.append(contentsOf: Array("Big".utf8))
-        let payloads = Data(count: 8)
         var info = Data()
         func info32(_ value: UInt32) {
             info.append(UInt8(truncatingIfNeeded: value >> 24))
