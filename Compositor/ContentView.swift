@@ -236,7 +236,7 @@ struct ContentView: View {
             if !empty { session.canvasFocusRequest += 1 }
         }
         .fileImporter(isPresented: $session.showsImporter,
-                      allowedContentTypes: [.jpeg, .png, .heic, .tiff], allowsMultipleSelection: true) { result in
+                      allowedContentTypes: UTType.importableImages, allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls): Task { await session.importImages(urls) }
             case .failure(let error):
