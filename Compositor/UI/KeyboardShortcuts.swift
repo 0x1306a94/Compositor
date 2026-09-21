@@ -91,7 +91,10 @@ struct ShortcutDefinition: Identifiable {
             entry("Transform Layer / Selection", "t", 1, menu: true), entry("Duplicate / Layer via Copy", "j", 1, menu: true),
             entry("Toggle Clipping Mask", "g", 3, menu: true), entry("Group Layers", "g", 1, menu: true),
             entry("New Blank Layer", "n", 9, menu: true), entry("Move Layer Up", "]", 1, menu: true),
-            entry("Move Layer Down", "[", 1, menu: true), entry("Merge Layers", "e", 1, menu: true)
+            entry("Move Layer Down", "[", 1, menu: true), entry("Merge Layers", "e", 1, menu: true),
+            entry("Show Grid", "'", 1, menu: true), entry("Show Guides", ";", 1, menu: true),
+            entry("Show Rulers", "r", 1, menu: true), entry("Snap", ";", 9, menu: true),
+            entry("Lock Guides", ";", 3, menu: true)
         ]
         for (title, key) in [("Select tool", "a"), ("Move / Transform tool", "v"), ("Hand tool", "h"),
             ("Zoom tool", "z"), ("Brush tool", "b"), ("Eraser", "e"), ("Spot Healing", "j"),
