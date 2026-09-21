@@ -83,7 +83,7 @@ nonisolated enum PSDFixture {
         let top = Int(record.bounds.minY.rounded())
         var channels: [(id: Int16, payload: Data)] = []
         if let image, width > 0, height > 0 {
-            let planes = try PSDChannelCoder.planes(from: image)
+            let planes = try planes(from: image)
             for (id, plane) in [(-1, planes.alpha), (0, planes.red), (1, planes.green), (2, planes.blue)] as [(Int16, [UInt8])] {
                 channels.append((id, channelPayload(plane, width: width, height: height)))
             }
@@ -91,7 +91,7 @@ nonisolated enum PSDFixture {
             channels = emptyChannels()
         }
         if let mask = record.mask {
-            let plane = try PSDChannelCoder.grayPlane(from: mask)
+            let plane = try grayPlane(from: mask)
             channels.append((-2, channelPayload(plane, width: mask.width, height: mask.height)))
         }
         return Prepared(record: record, isDivider: false, channels: channels,
@@ -112,7 +112,7 @@ nonisolated enum PSDFixture {
         var channels = emptyChannels()
         var maskBottom = 0, maskRight = 0
         if let mask {
-            let plane = try PSDChannelCoder.grayPlane(from: mask)
+            let plane = try grayPlane(from: mask)
             channels.append((-2, channelPayload(plane, width: mask.width, height: mask.height)))
             maskBottom = mask.height
             maskRight = mask.width
@@ -126,7 +126,7 @@ nonisolated enum PSDFixture {
     }
 
     private static func channelPayload(_ plane: [UInt8], width: Int, height: Int) -> Data {
-        let encoded = PSDChannelCoder.encode(plane, width: width, height: height)
+        let encoded = encode(plane, width: width, height: height)
         var data = Data([UInt8(encoded.compression >> 8), UInt8(encoded.compression & 0xff)])
         data.append(encoded.data)
         return data
@@ -231,17 +231,102 @@ nonisolated enum PSDFixture {
         let context = try BrushRaster.context(width: width, height: height, mask: false)
         BrushRaster.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height), mask: false, context: context)
         guard let flattened = context.makeImage() else { throw ExportError.render }
-        let planes = try PSDChannelCoder.planes(from: flattened)
+        let planes = try planes(from: flattened)
         file.u16(1)
         var counts = Data()
         var packed = Data()
         for plane in [planes.red, planes.green, planes.blue, planes.alpha] {
-            let encoded = PSDChannelCoder.encode(plane, width: width, height: height)
+            let encoded = encode(plane, width: width, height: height)
             counts.append(encoded.data.prefix(height * 2))
             packed.append(encoded.data.dropFirst(height * 2))
         }
         file.bytes(counts)
         file.bytes(packed)
+    }
+
+    private static func encode(_ plane: [UInt8], width: Int, height: Int) -> (compression: UInt16, data: Data) {
+        guard width > 0, height > 0, plane.count >= width * height else {
+            return (0, Data())
+        }
+        var counts = Data()
+        var packed = Data()
+        counts.reserveCapacity(height * 2)
+        for row in 0..<height {
+            let slice = plane[row * width ..< (row + 1) * width]
+            let encoded = packBits(Array(slice))
+            counts.append(UInt8(truncatingIfNeeded: encoded.count >> 8))
+            counts.append(UInt8(truncatingIfNeeded: encoded.count))
+            packed.append(encoded)
+        }
+        var data = counts
+        data.append(packed)
+        return (1, data)
+    }
+
+    /// Premultiplied RGBA, first row at the top of the image.
+    private static func planes(from image: CGImage) throws -> (red: [UInt8], green: [UInt8], blue: [UInt8], alpha: [UInt8]) {
+        let width = image.width, height = image.height
+        let context = try BrushRaster.context(width: width, height: height, mask: false)
+        BrushRaster.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height), mask: false, context: context)
+        guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else { throw ExportError.render }
+        var red = [UInt8](repeating: 0, count: width * height)
+        var green = [UInt8](repeating: 0, count: width * height)
+        var blue = [UInt8](repeating: 0, count: width * height)
+        var alpha = [UInt8](repeating: 0, count: width * height)
+        let stride = context.bytesPerRow
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = y * width + x
+                let p = y * stride + x * 4
+                let r = data[p], g = data[p + 1], b = data[p + 2], a = data[p + 3]
+                alpha[i] = a
+                if a == 0 {
+                    red[i] = 0; green[i] = 0; blue[i] = 0
+                } else {
+                    red[i] = UInt8(min(255, (Int(r) * 255 + Int(a) / 2) / Int(a)))
+                    green[i] = UInt8(min(255, (Int(g) * 255 + Int(a) / 2) / Int(a)))
+                    blue[i] = UInt8(min(255, (Int(b) * 255 + Int(a) / 2) / Int(a)))
+                }
+            }
+        }
+        return (red, green, blue, alpha)
+    }
+
+    private static func grayPlane(from image: CGImage) throws -> [UInt8] {
+        let width = image.width, height = image.height
+        let context = try BrushRaster.context(width: width, height: height, mask: true)
+        BrushRaster.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height), mask: true, context: context)
+        guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else { throw ExportError.render }
+        var plane = [UInt8](repeating: 0, count: width * height)
+        let stride = context.bytesPerRow
+        for y in 0..<height {
+            for x in 0..<width { plane[y * width + x] = data[y * stride + x] }
+        }
+        return plane
+    }
+
+    private static func packBits(_ row: [UInt8]) -> Data {
+        var output = Data()
+        var i = 0
+        while i < row.count {
+            if i + 1 < row.count, row[i] == row[i + 1] {
+                var run = 2
+                while i + run < row.count, row[i + run] == row[i], run < 128 { run += 1 }
+                output.append(UInt8(bitPattern: Int8(1 - run)))
+                output.append(row[i])
+                i += run
+            } else {
+                let start = i
+                i += 1
+                while i < row.count, i - start < 128 {
+                    if i + 1 < row.count, row[i] == row[i + 1] { break }
+                    i += 1
+                }
+                output.append(UInt8(i - start - 1))
+                output.append(contentsOf: row[start..<i])
+            }
+        }
+        return output
     }
 }
 

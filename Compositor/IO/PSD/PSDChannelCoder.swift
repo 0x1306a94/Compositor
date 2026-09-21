@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// PackBits and planar RGB(A) for Photoshop layer channels, from Adobe’s 2019
-/// Photoshop File Formats Specification (Image Data, compression 0 and 1).
+/// Unpacks Photoshop layer channels from Adobe’s 2019 Photoshop File Formats
+/// Specification (Image Data, compression 0 raw and 1 PackBits).
 nonisolated enum PSDChannelCoder {
     static func decode(compression: Int, width: Int, height: Int, data: Data) throws -> [UInt8] {
         guard width > 0, height > 0 else { return [] }
@@ -16,25 +16,6 @@ nonisolated enum PSDChannelCoder {
         default:
             throw PSDError.unsupportedCompression
         }
-    }
-
-    static func encode(_ plane: [UInt8], width: Int, height: Int) -> (compression: UInt16, data: Data) {
-        guard width > 0, height > 0, plane.count >= width * height else {
-            return (0, Data())
-        }
-        var counts = Data()
-        var packed = Data()
-        counts.reserveCapacity(height * 2)
-        for row in 0..<height {
-            let slice = plane[row * width ..< (row + 1) * width]
-            let encoded = packBits(Array(slice))
-            counts.append(UInt8(truncatingIfNeeded: encoded.count >> 8))
-            counts.append(UInt8(truncatingIfNeeded: encoded.count))
-            packed.append(encoded)
-        }
-        var data = counts
-        data.append(packed)
-        return (1, data)
     }
 
     static func rgbaImage(width: Int, height: Int, red: [UInt8], green: [UInt8], blue: [UInt8], alpha: [UInt8]) throws -> CGImage {
@@ -73,48 +54,6 @@ nonisolated enum PSDChannelCoder {
                 provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
         else { throw PSDError.truncated }
         return image
-    }
-
-    /// Premultiplied RGBA, first row at the top of the image.
-    static func planes(from image: CGImage) throws -> (red: [UInt8], green: [UInt8], blue: [UInt8], alpha: [UInt8]) {
-        let width = image.width, height = image.height
-        let context = try BrushRaster.context(width: width, height: height, mask: false)
-        BrushRaster.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height), mask: false, context: context)
-        guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else { throw ExportError.render }
-        var red = [UInt8](repeating: 0, count: width * height)
-        var green = [UInt8](repeating: 0, count: width * height)
-        var blue = [UInt8](repeating: 0, count: width * height)
-        var alpha = [UInt8](repeating: 0, count: width * height)
-        let stride = context.bytesPerRow
-        for y in 0..<height {
-            for x in 0..<width {
-                let i = y * width + x
-                let p = y * stride + x * 4
-                let r = data[p], g = data[p + 1], b = data[p + 2], a = data[p + 3]
-                alpha[i] = a
-                if a == 0 {
-                    red[i] = 0; green[i] = 0; blue[i] = 0
-                } else {
-                    red[i] = UInt8(min(255, (Int(r) * 255 + Int(a) / 2) / Int(a)))
-                    green[i] = UInt8(min(255, (Int(g) * 255 + Int(a) / 2) / Int(a)))
-                    blue[i] = UInt8(min(255, (Int(b) * 255 + Int(a) / 2) / Int(a)))
-                }
-            }
-        }
-        return (red, green, blue, alpha)
-    }
-
-    static func grayPlane(from image: CGImage) throws -> [UInt8] {
-        let width = image.width, height = image.height
-        let context = try BrushRaster.context(width: width, height: height, mask: true)
-        BrushRaster.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height), mask: true, context: context)
-        guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else { throw ExportError.render }
-        var plane = [UInt8](repeating: 0, count: width * height)
-        let stride = context.bytesPerRow
-        for y in 0..<height {
-            for x in 0..<width { plane[y * width + x] = data[y * stride + x] }
-        }
-        return plane
     }
 
     private static func unpackRLE(width: Int, height: Int, data: Data) throws -> [UInt8] {
@@ -156,29 +95,5 @@ nonisolated enum PSDChannelCoder {
             offset = end
         }
         return plane
-    }
-
-    private static func packBits(_ row: [UInt8]) -> Data {
-        var output = Data()
-        var i = 0
-        while i < row.count {
-            if i + 1 < row.count, row[i] == row[i + 1] {
-                var run = 2
-                while i + run < row.count, row[i + run] == row[i], run < 128 { run += 1 }
-                output.append(UInt8(bitPattern: Int8(1 - run)))
-                output.append(row[i])
-                i += run
-            } else {
-                let start = i
-                i += 1
-                while i < row.count, i - start < 128 {
-                    if i + 1 < row.count, row[i] == row[i + 1] { break }
-                    i += 1
-                }
-                output.append(UInt8(i - start - 1))
-                output.append(contentsOf: row[start..<i])
-            }
-        }
-        return output
     }
 }
