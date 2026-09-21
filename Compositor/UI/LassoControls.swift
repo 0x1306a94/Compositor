@@ -129,6 +129,9 @@ struct LassoControls: View {
                                 change: { session.objectSelectionSettings.edgeOffset = Int(min(10, max(-10, $0.rounded()))) })
                     .unitSuffix("px")
             }
+            // The bar squeezes text before controls, so without this the label and unit collapse to
+            // nothing the moment a selection adds its own buttons, leaving an unlabelled number box.
+            .fixedSize()
             .help("Positive values tighten the detected mask inward; negative values expand it outward")
         }
     }
