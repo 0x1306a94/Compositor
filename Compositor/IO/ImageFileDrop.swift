@@ -42,10 +42,15 @@ enum ImageFileDrop {
                 guard let url else { continuation.resume(returning: nil); return }
                 let name = url.deletingPathExtension().lastPathComponent
                 let suffix = url.pathExtension.isEmpty ? (UTType(type)?.preferredFilenameExtension ?? "png") : url.pathExtension
-                let copy = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("\(name.isEmpty ? "Dropped" : name)-\(UUID().uuidString)")
+                // A unique folder rather than a unique file name: the copy keeps the name the file
+                // was dropped under, which is the name the import sheet and the new layers show.
+                let folder = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                let copy = folder
+                    .appendingPathComponent(name.isEmpty ? "Dropped" : name)
                     .appendingPathExtension(suffix)
                 do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                     try FileManager.default.copyItem(at: url, to: copy)
                     continuation.resume(returning: copy)
                 } catch { continuation.resume(returning: nil) }
