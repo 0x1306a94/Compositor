@@ -149,7 +149,7 @@ final class EditorSession {
     private var fileRequestWaiters: [CheckedContinuation<Void, Never>] = []
     var canStartProjectOperation: Bool {
         _ = showsBusy // Re-evaluate in the UI when a long operation starts or ends.
-        return selectionAmountOperation == nil && textDraft == nil && !isProjectBusy && !isImporting && brushStroke == nil && warpStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && adjustmentEditingID == nil
+        return selectionAmountOperation == nil && textDraft == nil && !isProjectBusy && !isImporting && brushStroke == nil && warpStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && adjustmentEditingID == nil && !showsConversionSheet
     }
     func waitForFileRequest() async {
         while !canStartProjectOperation {
@@ -510,6 +510,11 @@ final class EditorSession {
     var showsImporter = false { didSet { resumeFileRequests() } }
     var isImporting = false { didSet { resumeFileRequests() } }
     var importError: String? { didSet { resumeFileRequests() } }
+    var showsConversionSheet = false { didSet { resumeFileRequests() } }
+    @ObservationIgnored var conversionRequest: PSDConversionRequest?
+    /// Tests assign this to skip the conversion sheet.
+    @ObservationIgnored var confirmConversions: (([PSDConversion]) async -> Bool)?
+    @ObservationIgnored private var conversionContinuation: CheckedContinuation<Bool, Never>?
     var opacityEditLayerID: UUID?
     var blendPreview: (layerID: UUID, mode: LayerBlendMode)?
     @ObservationIgnored var refreshCanvasPreview: (() -> Void)?
@@ -526,7 +531,7 @@ final class EditorSession {
     var isModified: Bool { history.isModified }
     var canUseHistory: Bool {
         _ = showsBusy
-        return selectionAmountOperation == nil && textDraft == nil && !isProjectBusy && !isImporting && brushStroke == nil && warpStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && transformEdit == nil
+        return selectionAmountOperation == nil && textDraft == nil && !isProjectBusy && !isImporting && brushStroke == nil && warpStroke == nil && levels == nil && !showsNewDocument && !showsImporter && renamingLayerID == nil && importError == nil && transformEdit == nil && !showsConversionSheet
     }
     var canUndo: Bool { canUseHistory && (history.canUndo || gradientEdit != nil) }
     var canRedo: Bool { canUseHistory && history.canRedo }
@@ -702,7 +707,8 @@ final class EditorSession {
         var failures: [String] = []
         while !pendingImports.isEmpty {
           let request = pendingImports.removeFirst()
-          beginEdit("Import Images")
+          let psdOnly = request.files.allSatisfy { PSDReader.matches($0.0) }
+          beginEdit(psdOnly ? "Import Photoshop File" : "Import Images")
           // No document: the first successful image determines the canvas, regardless of drop point.
           let point = document == nil ? nil : request.point
           for (url, scoped) in request.files {
@@ -713,8 +719,19 @@ final class EditorSession {
                     guard let image = layer.asset?.image else { return total }
                     return total + image.width * image.height
                 } ?? 0
-                let asset = try await ImageImporter.shared.decode(url, remainingPixels: 100_000_000 - usedPixels)
-                insert(asset, centeredAt: point)
+                if PSDReader.matches(url) {
+                    let parsed = try await ImageImporter.shared.loadPhotoshop(url, remainingPixels: 100_000_000 - usedPixels)
+                    let assets = try await ImageImporter.shared.photoshopAssets(parsed)
+                    let imported = try PSDDocumentBuilder.makeImport(parsed, assets: assets)
+                    if !imported.conversions.isEmpty {
+                        let confirmed = await confirmPSDConversions(imported.conversions, title: "Open “\(url.lastPathComponent)”?", confirmTitle: "Import")
+                        if !confirmed { continue }
+                    }
+                    try insertPhotoshop(imported, named: url.deletingPathExtension().lastPathComponent, centeredAt: point)
+                } else {
+                    let asset = try await ImageImporter.shared.decode(url, remainingPixels: 100_000_000 - usedPixels)
+                    insert(asset, centeredAt: point)
+                }
             } catch {
                 failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -742,6 +759,60 @@ final class EditorSession {
         if let parent = layer.parentID { collapsedGroupIDs.remove(parent) }
         self.document?.layers.append(layer)
         activeLayerID = layer.id
+    }
+
+    func confirmPSDConversions(_ conversions: [PSDConversion], title: String, confirmTitle: String) async -> Bool {
+        if let confirmConversions { return await confirmConversions(conversions) }
+        return await withCheckedContinuation { continuation in
+            conversionContinuation = continuation
+            conversionRequest = PSDConversionRequest(title: title, confirmTitle: confirmTitle, conversions: conversions)
+            showsConversionSheet = true
+        }
+    }
+
+    func finishConversion(_ confirmed: Bool) {
+        showsConversionSheet = false
+        conversionRequest = nil
+        let continuation = conversionContinuation
+        conversionContinuation = nil
+        continuation?.resume(returning: confirmed)
+    }
+
+    func insertPhotoshop(_ imported: PSDImport, named: String, centeredAt point: CGPoint? = nil) throws {
+        beginEdit("Import Photoshop File")
+        defer { endEdit() }
+        var incoming = imported.layers
+        let wrapping = document != nil
+        let added = incoming.count + (wrapping ? 1 : 0)
+        if (document?.layers.count ?? 0) + added > 10_000 { throw ImageImportError.tooLarge }
+        if document == nil {
+            document = CanvasDocument(width: imported.width, height: imported.height, layers: incoming, resolution: imported.resolution)
+            viewport.fit(documentSize: document!.size)
+            activeLayerID = incoming.last(where: { $0.parentID == nil })?.id ?? incoming.last?.id
+            return
+        }
+        guard document != nil else { return }
+        var group = ImageLayer(name: named, blankSize: document!.size)
+        group.isGroup = true
+        group.parentID = activeLayer?.isGroup == true ? activeLayerID : activeLayer?.parentID
+        if let point {
+            let box = incoming.filter { !$0.isGroup }.reduce(CGRect.null) { $0.union(CGRect(origin: $1.origin, size: $1.size)) }
+            if !box.isNull, !box.isInfinite, !box.isEmpty, box.origin.x.isFinite, box.origin.y.isFinite {
+                let dx = point.x - box.midX, dy = point.y - box.midY
+                for index in incoming.indices {
+                    incoming[index].transform.origin.x += dx
+                    incoming[index].transform.origin.y += dy
+                }
+            }
+        }
+        for index in incoming.indices where incoming[index].parentID == nil {
+            incoming[index].parentID = group.id
+        }
+        self.document?.layers.append(group)
+        self.document?.layers.append(contentsOf: incoming)
+        if let parent = group.parentID { collapsedGroupIDs.remove(parent) }
+        collapsedGroupIDs.remove(group.id)
+        activeLayerID = group.id
     }
 
     /// `emptyLayer` starts the canvas with a selected blank "Layer 1", as File > New does.
