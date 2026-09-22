@@ -111,22 +111,102 @@ struct NativeLayerList: NSViewRepresentable {
         func contextMenu(for row: Int) -> NSMenu? {
             guard rows.indices.contains(row) else { return nil }
             let menu = NSMenu()
-            for (title, action) in [
-                ("Rename…", #selector(renameLayerAction)),
-                ("Hide/Show Layer", #selector(toggleVisibilityAction)),
-                ("Add White Mask", #selector(addWhiteMaskAction)),
-                ("Add Black Mask", #selector(addBlackMaskAction)),
-                ("Enable/Disable Mask", #selector(toggleMaskAction)),
-                ("Delete Mask", #selector(deleteMaskAction)),
-                ("Release Clipping Mask", #selector(removeLiveMaskAction)),
-                ("Move Out of Folder", #selector(moveOutOfFolderAction)),
-                ("Delete Layer / Folder", #selector(deleteLayerAction))
-            ] {
-                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-                item.target = self
-                menu.addItem(item)
+
+            // 1. Duplicate Layer
+            let duplicateItem = NSMenuItem(title: "Duplicate Layer", action: #selector(duplicateLayerAction), keyEquivalent: "")
+            duplicateItem.target = self
+            menu.addItem(duplicateItem)
+
+            // 2. Rename…
+            let renameItem = NSMenuItem(title: "Rename…", action: #selector(renameLayerAction), keyEquivalent: "")
+            renameItem.target = self
+            menu.addItem(renameItem)
+
+            // 3. Delete Layer / Delete Selected Layers
+            let deleteTitle: String
+            if session.isMaskSelected && session.activeLayer?.mask != nil {
+                deleteTitle = "Delete Mask"
+            } else if session.selectedLayerIDs.count > 1 {
+                deleteTitle = "Delete Selected Layers"
+            } else {
+                deleteTitle = "Delete Layer"
             }
+            let deleteItem = NSMenuItem(title: deleteTitle, action: #selector(deleteLayerAction), keyEquivalent: "")
+            deleteItem.target = self
+            menu.addItem(deleteItem)
+
+            menu.addItem(NSMenuItem.separator())
+
+            // 4. Create Clipping Mask / Release Clipping Mask
+            let clippingTitle = session.activeLayer?.maskSourceID != nil ? "Release Clipping Mask" : "Create Clipping Mask"
+            let clippingItem = NSMenuItem(title: clippingTitle, action: #selector(toggleClippingMaskAction), keyEquivalent: "")
+            clippingItem.target = self
+            menu.addItem(clippingItem)
+
+            // 5. Group Selected Layers
+            let groupItem = NSMenuItem(title: "Group Selected Layers", action: #selector(groupSelectedLayersAction), keyEquivalent: "")
+            groupItem.target = self
+            menu.addItem(groupItem)
+
+            // 6. Move Out of Folder
+            let moveOutItem = NSMenuItem(title: "Move Out of Folder", action: #selector(moveOutOfFolderAction), keyEquivalent: "")
+            moveOutItem.target = self
+            menu.addItem(moveOutItem)
+
+            // 7. Merge Down / Merge Layers / Merge Group
+            let mergeItem = NSMenuItem(title: session.mergeTitle, action: #selector(mergeLayersAction), keyEquivalent: "")
+            mergeItem.target = self
+            menu.addItem(mergeItem)
+
+            menu.addItem(NSMenuItem.separator())
+
+            // 8. Add Mask >
+            let addMaskItem = NSMenuItem(title: "Add Mask", action: nil, keyEquivalent: "")
+            let addMaskSubmenu = NSMenu(title: "Add Mask")
+            let revealAllItem = NSMenuItem(title: "Reveal All (White)", action: #selector(addWhiteMaskAction), keyEquivalent: "")
+            revealAllItem.target = self
+            addMaskSubmenu.addItem(revealAllItem)
+            let hideAllItem = NSMenuItem(title: "Hide All (Black)", action: #selector(addBlackMaskAction), keyEquivalent: "")
+            hideAllItem.target = self
+            addMaskSubmenu.addItem(hideAllItem)
+            addMaskItem.submenu = addMaskSubmenu
+            menu.addItem(addMaskItem)
+
+            // 9. Enable Mask / Disable Mask
+            let toggleMaskTitle = session.activeLayer?.mask?.isEnabled == false ? "Enable Mask" : "Disable Mask"
+            let toggleMaskItem = NSMenuItem(title: toggleMaskTitle, action: #selector(toggleMaskAction), keyEquivalent: "")
+            toggleMaskItem.target = self
+            menu.addItem(toggleMaskItem)
+
+            // 10. Delete Mask
+            let deleteMaskItem = NSMenuItem(title: "Delete Mask", action: #selector(deleteMaskAction), keyEquivalent: "")
+            deleteMaskItem.target = self
+            menu.addItem(deleteMaskItem)
+
+            // 11. Link Mask / Unlink Mask
+            let linkMaskTitle = session.activeLayer?.mask?.isLinked == false ? "Link Mask" : "Unlink Mask"
+            let linkMaskItem = NSMenuItem(title: linkMaskTitle, action: #selector(toggleMaskLinkAction), keyEquivalent: "")
+            linkMaskItem.target = self
+            menu.addItem(linkMaskItem)
+
+            menu.addItem(NSMenuItem.separator())
+
+            // 12. Layer Effects…
+            let effectsItem = NSMenuItem(title: "Layer Effects…", action: #selector(layerEffectsAction), keyEquivalent: "")
+            effectsItem.target = self
+            menu.addItem(effectsItem)
+
+            // 13. Hide Layer / Show Layer
+            let visibilityTitle = session.activeLayer?.isVisible == false ? "Show Layer" : "Hide Layer"
+            let visibilityItem = NSMenuItem(title: visibilityTitle, action: #selector(toggleVisibilityAction), keyEquivalent: "")
+            visibilityItem.target = self
+            menu.addItem(visibilityItem)
+
             return menu
+        }
+
+        @objc func duplicateLayerAction(_ sender: Any?) {
+            session.duplicateActiveLayer()
         }
 
         @objc func renameLayerAction(_ sender: Any?) {
@@ -134,9 +214,24 @@ struct NativeLayerList: NSViewRepresentable {
             session.renamingLayerID = id
         }
 
-        @objc func toggleVisibilityAction(_ sender: Any?) {
-            guard let id = session.activeLayerID else { return }
-            session.toggleLayerVisibility(id)
+        @objc func deleteLayerAction(_ sender: Any?) {
+            session.deleteLayerOrMask()
+        }
+
+        @objc func toggleClippingMaskAction(_ sender: Any?) {
+            if let id = session.activeLayerID { session.toggleClippingMask(id) }
+        }
+
+        @objc func groupSelectedLayersAction(_ sender: Any?) {
+            session.groupSelectedLayers()
+        }
+
+        @objc func moveOutOfFolderAction(_ sender: Any?) {
+            session.moveActiveLayerOutOfGroup()
+        }
+
+        @objc func mergeLayersAction(_ sender: Any?) {
+            session.mergeLayers()
         }
 
         @objc func addWhiteMaskAction(_ sender: Any?) {
@@ -163,16 +258,22 @@ struct NativeLayerList: NSViewRepresentable {
             session.deleteLayerMask()
         }
 
-        @objc func removeLiveMaskAction(_ sender: Any?) {
-            if let id = session.activeLayerID { session.removeLiveMask(from: id) }
+        @objc func toggleMaskLinkAction(_ sender: Any?) {
+            if let id = session.activeLayerID { session.toggleMaskLink(id) }
         }
 
-        @objc func moveOutOfFolderAction(_ sender: Any?) {
-            session.moveActiveLayerOutOfGroup()
+        @objc func layerEffectsAction(_ sender: Any?) {
+            guard session.canEditEffects, let id = session.activeLayerID else { return }
+            if let kind = session.activeLayer?.effects?.kinds.first {
+                session.selectEffect(kind, on: id, editing: true)
+            } else {
+                session.addEffect(.stroke)
+            }
         }
 
-        @objc func deleteLayerAction(_ sender: Any?) {
-            session.deleteLayerOrMask()
+        @objc func toggleVisibilityAction(_ sender: Any?) {
+            guard let id = session.activeLayerID else { return }
+            session.toggleLayerVisibility(id)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
