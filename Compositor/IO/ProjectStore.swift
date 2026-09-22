@@ -11,7 +11,7 @@ extension UTType {
 
 nonisolated struct ProjectManifest: Codable, Sendable {
     var format = "com.compositor.project"
-    var version = 8
+    var version = 9
     var colorSpace = "sRGB"
     var resolution: Double? = nil // Older version-1 projects default to 72 pixels/inch.
     let documentID: UUID
@@ -179,7 +179,7 @@ actor ProjectStore {
 
     private func validate(_ manifest: ProjectManifest) throws {
         guard manifest.format == "com.compositor.project" else { throw ProjectError.invalid }
-        guard (1...8).contains(manifest.version) else { throw ProjectError.version(manifest.version) }
+        guard (1...9).contains(manifest.version) else { throw ProjectError.version(manifest.version) }
         guard manifest.colorSpace == "sRGB" else { throw ProjectError.invalid }
         if let resolution = manifest.resolution {
             guard resolution.isFinite, (1...9600).contains(resolution) else { throw ProjectError.invalid }
@@ -192,6 +192,9 @@ actor ProjectStore {
             }
             if let adjustment = layer.adjustment {
                 guard manifest.version >= 7, layer.isGroup != true, layer.imageFile == nil, adjustment.isValid else { throw ProjectError.invalid }
+                if adjustment.kind == .gaussianBlur || adjustment.kind == .motionBlur {
+                    guard manifest.version >= 9 else { throw ProjectError.invalid }
+                }
             }
             // Layer masks arrived in version 4, folder masks in version 6.
             guard layer.maskFile == nil || (manifest.version >= (layer.isGroup == true ? 6 : 4)

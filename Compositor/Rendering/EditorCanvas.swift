@@ -775,7 +775,12 @@ final class CanvasView: NSView {
         // read back (see SeparableBlend).
         if !onSurface, document.layers.contains(where: { $0.adjustment != nil
             || SeparableBlend.needsSurface(session.displayedBlendMode(for: $0)) }) {
-            AdjustmentSurface.draw(in: context) { self.drawLayers(document, scale: scale, center: center, in: $0, onSurface: true) }
+            let visible = document.effectiveVisibleIDs
+            let padding = document.layers.filter { visible.contains($0.id) }
+                .compactMap(\.adjustment).map(\.samplingMargin).max() ?? 0
+            AdjustmentSurface.draw(in: context, padding: padding * scale) {
+                self.drawLayers(document, scale: scale, center: center, in: $0, onSurface: true)
+            }
             return
         }
         let byID = Dictionary(uniqueKeysWithValues: document.layers.map { ($0.id, $0) })
@@ -917,6 +922,7 @@ final class CanvasView: NSView {
         let live = LiveMaskRenderer(bounds: context.boundingBoxOfClipPath, source: { byID[$0]?.maskSourceID }, drawOwn: drawOwnWithDraft)
         live.adjustment = { byID[$0]?.adjustment }
         live.adjustmentOpacity = { byID[$0]?.effectiveOpacity(in: byID) ?? 1 }
+        live.adjustmentScale = scale
         let area = context.boundingBoxOfClipPath
         live.adjustmentClip = { [weak self] id, ctx in
             guard let self, let layer = byID[id], layer.mask?.isEnabled == true else { return }
