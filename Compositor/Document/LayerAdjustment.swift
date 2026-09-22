@@ -4,7 +4,7 @@ import CoreImage
 nonisolated enum AdjustmentKind: String, Codable, CaseIterable, Sendable {
     case hsv = "Hue/Saturation", levels = "Levels", curves = "Curves"
     case exposure = "Exposure", gradientMap = "Gradient Map", grain = "Grain"
-    case gaussianBlur = "Gaussian Blur", motionBlur = "Motion Blur"
+    case gaussianBlur = "Gaussian Blur", motionBlur = "Motion Blur", addNoise = "Add Noise"
     case invert = "Invert"
     case blackWhite = "Black & White", colorBalance = "Color Balance"
     var symbol: String {
@@ -17,6 +17,7 @@ nonisolated enum AdjustmentKind: String, Codable, CaseIterable, Sendable {
         case .grain: return "circle.grid.3x3"
         case .gaussianBlur: return "drop.fill"
         case .motionBlur: return "wind"
+        case .addNoise: return "circle.dotted"
         case .invert: return "circle.righthalf.filled"
         case .blackWhite: return "circle.filled.pattern.diagonalline.rectangle"
         case .colorBalance: return "scale.3d"
@@ -35,6 +36,7 @@ nonisolated enum AdjustmentKind: String, Codable, CaseIterable, Sendable {
         case .grain: return .grain
         case .gaussianBlur: return .gaussianBlur
         case .motionBlur: return .motionBlur
+        case .addNoise: return .addNoise
         // Hue/Saturation and Levels have panels of their own; Invert has nothing to set.
         case .hsv, .levels, .invert: return nil
         }
@@ -63,6 +65,10 @@ nonisolated struct LayerAdjustment: Codable, Equatable, Sendable {
     var blurRadius: Double?
     var motionAngle: Double?
     var motionDistance: Double?
+    var noiseAmount: Double?
+    var noiseGaussian: Bool?
+    var noiseMonochromatic: Bool?
+    var noiseSeed: UInt32?
     var exposure: ExposureSettings {
         get { exposureSettings ?? ExposureSettings() }
         set { exposureSettings = newValue }
@@ -95,6 +101,22 @@ nonisolated struct LayerAdjustment: Codable, Equatable, Sendable {
         get { motionDistance ?? 10 }
         set { motionDistance = newValue }
     }
+    var resolvedNoiseAmount: Double {
+        get { noiseAmount ?? 10 }
+        set { noiseAmount = newValue }
+    }
+    var resolvedNoiseGaussian: Bool {
+        get { noiseGaussian ?? false }
+        set { noiseGaussian = newValue }
+    }
+    var resolvedNoiseMonochromatic: Bool {
+        get { noiseMonochromatic ?? false }
+        set { noiseMonochromatic = newValue }
+    }
+    var resolvedNoiseSeed: UInt32 {
+        get { noiseSeed ?? 0 }
+        set { noiseSeed = newValue }
+    }
     /// Document-pixel halo needed so a partial canvas redraw can sample beyond its dirty rectangle.
     var samplingMargin: CGFloat {
         switch kind {
@@ -115,6 +137,7 @@ nonisolated struct LayerAdjustment: Codable, Equatable, Sendable {
         && gaussianRadius.isFinite && (0.1...250).contains(gaussianRadius)
         && resolvedMotionAngle.isFinite && (-90...90).contains(resolvedMotionAngle)
         && resolvedMotionDistance.isFinite && (1...2000).contains(resolvedMotionDistance)
+        && resolvedNoiseAmount.isFinite && (0.1...400).contains(resolvedNoiseAmount)
     }
     /// `region` is the part of the document `image` covers (the whole image at one unit per pixel when
     /// omitted), so Grain's pattern stays fixed in the document however the canvas splits its drawing.
@@ -133,14 +156,23 @@ nonisolated struct LayerAdjustment: Codable, Equatable, Sendable {
         case .grain:
             let region = region ?? CGRect(x: 0, y: 0, width: image.width, height: image.height)
             return try grain.apply(image, origin: region.origin, unitsPerPixel: region.width / CGFloat(max(1, image.width)))
-        case .gaussianBlur, .motionBlur:
+        case .gaussianBlur, .motionBlur, .addNoise:
             var settings = FilterSettings()
             settings.radius = gaussianRadius
             settings.angle = resolvedMotionAngle
             settings.distance = resolvedMotionDistance
-            let filterKind: FilterKind = kind == .gaussianBlur ? .gaussianBlur : .motionBlur
+            settings.amount = resolvedNoiseAmount
+            settings.gaussian = resolvedNoiseGaussian
+            settings.monochromatic = resolvedNoiseMonochromatic
+            let filterKind: FilterKind = switch kind {
+            case .gaussianBlur: .gaussianBlur
+            case .motionBlur: .motionBlur
+            default: .addNoise
+            }
             return try PixelFilter.run(FilterJob(kind: filterKind, image: image, settings: settings,
-                                                  scale: scale, selection: nil, mapping: .identity))
+                                                  scale: scale, selection: nil, mapping: .identity,
+                                                  seed: resolvedNoiseSeed,
+                                                  noiseOrigin: region?.origin ?? .zero))
         case .invert:
             return try PixelInvert.run(PixelInvert.Job(image: image, isMask: false,
                                                        pixelToDocument: .identity, selection: nil))
@@ -159,6 +191,7 @@ extension EditorSession {
             adjustment.gradientMap = GradientMapSettings(shadows: AdjustmentColor(foregroundColor), highlights: AdjustmentColor(backgroundColor))
         }
         if kind == .grain { adjustment.grain.seed = .random(in: .min ... .max) }
+        if kind == .addNoise { adjustment.resolvedNoiseSeed = .random(in: .min ... .max) }
         layer.adjustment = adjustment
         layer.parentID = activeLayer?.isGroup == true ? activeLayerID : activeLayer?.parentID
         let index = document.layers.firstIndex { $0.id == activeLayerID }.map { $0 + 1 } ?? document.layers.count

@@ -93,6 +93,8 @@ nonisolated struct FilterJob: @unchecked Sendable {
     let mapping: CGAffineTransform
     /// Add Noise's random pattern: the same seed gives the same grain.
     var seed: UInt32 = 0
+    /// Canvas-space origin used by live adjustment layers so partial redraws keep one noise field.
+    var noiseOrigin: CGPoint = .zero
 }
 
 nonisolated enum PixelFilter {
@@ -160,8 +162,9 @@ nonisolated enum PixelFilter {
             let context = try BrushRaster.context(width: width, height: height, mask: false)
             BrushRaster.draw(job.image, in: extent, mask: false, context: context)
             guard let data = context.data else { throw ExportError.render }
-            noise_add(data.assumingMemoryBound(to: UInt8.self), width, height, context.bytesPerRow,
-                      Float(settings.amount), settings.gaussian ? 1 : 0, settings.monochromatic ? 1 : 0, job.seed)
+            noise_add_at(data.assumingMemoryBound(to: UInt8.self), width, height, context.bytesPerRow,
+                         Float(settings.amount), settings.gaussian ? 1 : 0, settings.monochromatic ? 1 : 0, job.seed,
+                         Int64(job.noiseOrigin.x.rounded(.down)), Int64(job.noiseOrigin.y.rounded(.down)))
             guard let noisy = context.makeImage() else { throw ExportError.render }
             image = noisy
         case .lensCorrection:

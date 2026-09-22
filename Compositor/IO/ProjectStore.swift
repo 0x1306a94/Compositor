@@ -192,7 +192,7 @@ actor ProjectStore {
             }
             if let adjustment = layer.adjustment {
                 guard manifest.version >= 7, layer.isGroup != true, layer.imageFile == nil, adjustment.isValid else { throw ProjectError.invalid }
-                if adjustment.kind == .gaussianBlur || adjustment.kind == .motionBlur {
+                if adjustment.kind == .gaussianBlur || adjustment.kind == .motionBlur || adjustment.kind == .addNoise {
                     guard manifest.version >= 9 else { throw ProjectError.invalid }
                 }
             }
