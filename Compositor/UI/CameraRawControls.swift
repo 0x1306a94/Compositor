@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Camera Raw Filter's adjustment column. Light, Color, and Effects edit the image; the other panels are
-/// only their headers.
+/// Camera Raw Filter's adjustment column: the histogram, then Light, Color, Effects, Curve, Color Mixer,
+/// Color Grading, Detail, Optics, Geometry, and Calibration.
 struct CameraRawControls: View {
     @Bindable var session: EditorSession
     @State private var expanded: Set<Section> = [.light, .color]
