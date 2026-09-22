@@ -59,7 +59,7 @@ nonisolated enum ProjectError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalid: "This is not a valid Compositor project, or its metadata is damaged."
-        case .version(let version): "This project uses format version \(version). This app supports versions 1–8."
+        case .version(let version): "This project uses format version \(version). This app supports versions 1–9."
         case .missingImage: "An image inside the project is missing or damaged. The current document has not been replaced."
         case .tooLarge: "This project exceeds the supported canvas, layer, file-size, or 100-megapixel image limit."
         case .encode: "An image could not be saved. The previous project has not been replaced."
@@ -139,7 +139,7 @@ actor ProjectStore {
         do { header = try JSONDecoder().decode(Header.self, from: metadata) }
         catch { throw ProjectError.invalid }
         guard header.format == "com.compositor.project" else { throw ProjectError.invalid }
-        guard (1...8).contains(header.version) else { throw ProjectError.version(header.version) }
+        guard (1...9).contains(header.version) else { throw ProjectError.version(header.version) }
         do { manifest = try JSONDecoder().decode(ProjectManifest.self, from: metadata) }
         catch { throw ProjectError.invalid }
         try validate(manifest)
