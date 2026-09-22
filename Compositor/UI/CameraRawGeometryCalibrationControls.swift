@@ -14,7 +14,7 @@ struct CameraRawGeometryControls: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .help("Automatic perspective presets. Guided uses lines you draw on the picture.")
+            .help("Off leaves the picture as it is. Guided straightens from lines you draw on the picture.")
             if raw.geometry.upright == .guided {
                 Button {
                     session.filterEdit?.drawingCameraRawGeometryGuide.toggle()

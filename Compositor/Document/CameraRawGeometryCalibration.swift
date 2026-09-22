@@ -3,10 +3,6 @@ import CoreImage
 
 nonisolated enum CameraRawUprightMode: String, CaseIterable, Sendable {
     case off = "Off"
-    case auto = "Auto"
-    case level = "Level"
-    case vertical = "Vertical"
-    case full = "Full"
     case guided = "Guided"
 }
 
@@ -43,8 +39,13 @@ nonisolated struct CameraRawGeometrySettings: Equatable, Sendable {
     static let rotateRange: ClosedRange<Double> = -45...45
 
     var adjusts: Bool {
-        upright != .off || vertical != 0 || horizontal != 0 || rotate != 0 || aspect != 0 || scale != 0
-            || offsetX != 0 || offsetY != 0 || !guides.isEmpty
+        usesGuides || vertical != 0 || horizontal != 0 || rotate != 0 || aspect != 0 || scale != 0
+            || offsetX != 0 || offsetY != 0
+    }
+
+    /// Guided only counts once a line is long enough to read. An empty Guided choice must not warp the picture.
+    private var usesGuides: Bool {
+        upright == .guided && guides.contains { hypot($0.endX - $0.startX, $0.endY - $0.startY) > 0.01 }
     }
 
     var normalized: Self {
@@ -102,14 +103,6 @@ nonisolated struct CameraRawGeometrySettings: Equatable, Sendable {
         switch upright {
         case .off:
             return (vertical, horizontal, rotate)
-        case .auto:
-            return (vertical + 28, horizontal + 18, rotate)
-        case .level:
-            return (vertical, horizontal, rotate + guidedLevel())
-        case .vertical:
-            return (vertical + 55, horizontal, rotate)
-        case .full:
-            return (vertical + 35, horizontal + 28, rotate)
         case .guided:
             let guided = Self.guidedCorrections(guides: guides)
             return (vertical + guided.vertical, horizontal + guided.horizontal, rotate + guided.rotate)
@@ -136,10 +129,6 @@ nonisolated struct CameraRawGeometrySettings: Equatable, Sendable {
             }
         }
         return (vertical, horizontal, rotate)
-    }
-
-    private func guidedLevel() -> Double {
-        Self.guidedCorrections(guides: guides).rotate
     }
 
     /// Core Image corner positions with y measured upward from the bottom.

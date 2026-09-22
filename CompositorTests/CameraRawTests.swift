@@ -555,6 +555,27 @@ struct CameraRawTests {
         #expect(hiddenPixels[0] == before)
     }
 
+    /// Upright is Off or Guided. Guided reads a drawn line; without one it must not invent a warp,
+    /// and two different pictures must not receive one shared result.
+    @Test func guidedUprightFollowsADrawnLineAndLeavesAnUnguidedPicture() throws {
+        #expect(Set(CameraRawUprightMode.allCases) == [.off, .guided])
+        let cool = try image(width: 16, height: 16, red: 0.2, green: 0.45, blue: 0.8)
+        let warm = try image(width: 16, height: 16, red: 0.85, green: 0.25, blue: 0.15)
+        let coolPixels = try pixels(cool)
+        let warmPixels = try pixels(warm)
+        var settings = CameraRawSettings()
+        settings.geometry.upright = .guided
+        #expect(try pixels(settings.apply(cool)) == coolPixels)
+        #expect(try pixels(settings.apply(warm)) == warmPixels)
+
+        settings.geometry.guides = [CameraRawGeometryGuide(startX: 0.1, startY: 0.15, endX: 0.9, endY: 0.8)]
+        let coolGuided = try pixels(settings.apply(cool))
+        let warmGuided = try pixels(settings.apply(warm))
+        #expect(coolGuided != coolPixels)
+        #expect(warmGuided != warmPixels)
+        #expect(coolGuided != warmGuided)
+    }
+
     private func peakIndex(_ bins: [Double]) -> Int {
         bins.enumerated().max { $0.element < $1.element }?.offset ?? -1
     }
