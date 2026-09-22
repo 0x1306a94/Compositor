@@ -77,9 +77,9 @@ struct FloatingPanelTests {
         #expect(session.levels == nil && session.hueSaturation == nil && session.filterEdit == nil)
     }
 
-    /// Camera Raw opens on the window's right edge. That frame must not become the place
+    /// Camera Raw docks to the document window. That frame must not become the place
     /// Gaussian Blur and the other filters reopen.
-    @Test func rightEdgePlacementLeavesTheSavedFilterPosition() throws {
+    @Test func dockedPlacementLeavesTheSavedFilterPosition() throws {
         let controller = FloatingPanelController(name: "testDockedFilterPosition")
         controller.show(title: "Gaussian Blur", content: Text("Blur"))
         settle()
@@ -89,7 +89,7 @@ struct FloatingPanelTests {
         let saved = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
         controller.close()
 
-        controller.show(title: "Camera Raw Filter", content: Text("Camera Raw"), placement: .openingAtMainWindowRight)
+        controller.show(title: "Camera Raw Filter", content: Text("Camera Raw").frame(maxWidth: .infinity, maxHeight: .infinity), placement: .dockedToMainWindowRight)
         settle()
         #expect(panel.isVisible)
         let document = try #require(NSApp.windows.first { $0 !== panel && $0.isVisible && !($0 is NSPanel) })
@@ -104,28 +104,30 @@ struct FloatingPanelTests {
         controller.close()
     }
 
-    /// Camera Raw opens against the document window's right edge rather than docking to it: the
-    /// docked panel tracked the window through move and resize notifications, and crashed while
-    /// SwiftUI re-measured its content mid-move. Opening there once, then behaving like any other
-    /// panel, keeps the placement people wanted without that.
+    /// Camera Raw docks to the document window's right edge, at its full height, and follows it.
     ///
-    /// The window it opens against is whichever one the app has, not one this test makes: the test
-    /// host is Compositor itself, so its own editor window is the main window throughout.
-    @Test func cameraRawOpensAgainstTheWindowsRightEdge() throws {
+    /// The window it docks to is whichever one the app has, not one this test makes: the test host
+    /// is Compositor itself, so its own editor window is main throughout. An earlier version of
+    /// this test built its own window, which the panel quite correctly ignored — and the two
+    /// windows together took the test host down.
+    @Test func cameraRawDocksToTheDocumentWindow() throws {
         let controller = FloatingPanelController(name: "testCameraRawOpensRight")
-        controller.show(title: "Camera Raw Filter", content: Text("Camera Raw").frame(width: 380, height: 500),
-                        placement: .openingAtMainWindowRight)
+        controller.show(title: "Camera Raw Filter", content: Text("Camera Raw").frame(maxWidth: .infinity, maxHeight: .infinity),
+                        placement: .dockedToMainWindowRight)
         settle()
         let panel = try #require(NSApp.windows.first { $0.identifier == controller.identifier })
         let document = try #require(NSApp.windows.first { $0 !== panel && $0.isVisible && !($0 is NSPanel) })
-        #expect(abs(panel.frame.maxX - document.frame.maxX) < 2, "opens on the right edge: \(panel.frame) vs \(document.frame)")
-        #expect(abs(panel.frame.maxY - document.frame.maxY) < 2, "top aligned: \(panel.frame) vs \(document.frame)")
+        #expect(abs(panel.frame.maxX - document.frame.maxX) < 2, "on the right edge: \(panel.frame) vs \(document.frame)")
+        #expect(abs(panel.frame.height - document.frame.height) < 2, "full height: \(panel.frame) vs \(document.frame)")
 
-        // It is an ordinary panel now, so a window move leaves it where it is.
-        let before = panel.frame
+        // A drag posts a move rather than a resize; the panel has to follow both.
         document.setFrameOrigin(NSPoint(x: document.frame.origin.x + 40, y: document.frame.origin.y + 30))
         settle()
-        #expect(panel.frame == before, "the panel stays put when the window moves")
+        #expect(abs(panel.frame.maxX - document.frame.maxX) < 2, "follows a move: \(panel.frame) vs \(document.frame)")
+        document.setFrame(NSRect(x: document.frame.minX, y: document.frame.minY,
+                                 width: document.frame.width, height: document.frame.height - 60), display: true)
+        settle()
+        #expect(abs(panel.frame.height - document.frame.height) < 2, "follows a resize: \(panel.frame) vs \(document.frame)")
         controller.close()
     }
 
