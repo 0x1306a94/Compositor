@@ -314,12 +314,12 @@ struct CameraRawControls: View {
     }
 
     private func setWhiteBalance(_ mode: CameraRawWhiteBalance) {
+        if mode == .auto {
+            Task { await session.applyCameraRawAutoWhiteBalance() }
+            return
+        }
         update { settings in
             settings.cameraRaw.whiteBalance = mode
-            guard mode == .auto, let image = session.filterEdit?.original.image,
-                  let solved = CameraRawSettings.autoBalance(of: image) else { return }
-            settings.cameraRaw.temperature = solved.temperature
-            settings.cameraRaw.tint = solved.tint
         }
     }
 

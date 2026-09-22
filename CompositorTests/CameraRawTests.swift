@@ -201,6 +201,35 @@ struct CameraRawTests {
         #expect(empty.filterEdit?.settings == untouched, "a transparent pixel is ignored")
     }
 
+    /// Auto stores its mode, then fills Temperature and Tint from the layer once the scan finishes.
+    @Test func autoWhiteBalanceNeutralizesAfterTheScan() async throws {
+        let straightRed = 160.0 / 255
+        let straightGreen = 140.0 / 255
+        let straightBlue = 120.0 / 255
+        let warm = try image(width: 8, height: 8, red: straightRed, green: straightGreen, blue: straightBlue)
+        let before = try pixels(warm)[0]
+        let session = EditorSession()
+        session.createDocument(width: 8, height: 8)
+        session.insert(ImportedImage(image: warm, thumbnail: warm, name: "Warm"))
+        session.beginFilter(.cameraRaw)
+        await session.applyCameraRawAutoWhiteBalance()
+        let raw = try #require(session.filterEdit).settings.cameraRaw
+        #expect(raw.whiteBalance == .auto)
+        let averaged = try pixels(raw.apply(warm))[0]
+        #expect(chroma(averaged) < chroma(before) / 2, "auto neutralizes after the scan: \(averaged)")
+
+        session.cancelFilter()
+        let clear = try image(width: 8, height: 8, red: 1, green: 0, blue: 0, alpha: 0)
+        let empty = EditorSession()
+        empty.createDocument(width: 8, height: 8)
+        empty.insert(ImportedImage(image: clear, thumbnail: clear, name: "Clear"))
+        empty.beginFilter(.cameraRaw)
+        await empty.applyCameraRawAutoWhiteBalance()
+        let untouched = try #require(empty.filterEdit).settings.cameraRaw
+        #expect(untouched.whiteBalance == .auto)
+        #expect(untouched.temperature == 0 && untouched.tint == 0, "a layer with no coverage leaves the sliders alone")
+    }
+
     @Test func hiddenGroupIsLeftOutAndOkIsOneUndoOrNone() async throws {
         let input = try gray(width: 8, height: 8)
         var settings = CameraRawSettings()

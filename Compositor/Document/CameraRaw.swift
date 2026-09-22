@@ -440,6 +440,24 @@ extension EditorSession {
         } catch { brushError = error.localizedDescription }
     }
 
+    /// White Balance > Auto. The mode is stored before the scan, so the picker moves on the click.
+    /// The average of the original layer is taken off the main thread, then applied only if Auto is still selected.
+    func applyCameraRawAutoWhiteBalance() async {
+        guard let edit = filterEdit, edit.kind == .cameraRaw, !edit.committing else { return }
+        var settings = edit.settings
+        settings.cameraRaw.whiteBalance = .auto
+        updateFilter(settings, preview: edit.preview)
+        let image = edit.original.image
+        let solved = await Task.detached(priority: .userInitiated) {
+            CameraRawSettings.autoBalance(of: image)
+        }.value
+        guard filterEdit === edit, !edit.committing, edit.settings.cameraRaw.whiteBalance == .auto, let solved else { return }
+        settings = edit.settings
+        settings.cameraRaw.temperature = solved.temperature
+        settings.cameraRaw.tint = solved.tint
+        updateFilter(settings, preview: edit.preview)
+    }
+
     /// Defringe eyedropper: centers the purple or green hue range on the clicked fringe color.
     func sampleCameraRawDefringe(at point: CGPoint) {
         guard let edit = filterEdit, edit.kind == .cameraRaw, edit.samplesDefringe, !edit.committing,
