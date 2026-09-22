@@ -229,7 +229,7 @@ struct ContentView: View {
             if closed { filterPanel.close() }
             else {
                 filterPanel.onClose = { session.cancelFilter() }
-                let placement: FloatingPanelPlacement = session.filterEdit?.kind == .cameraRaw ? .dockedToMainWindowRight : .automatic
+                let placement: FloatingPanelPlacement = session.filterEdit?.kind == .cameraRaw ? .openingAtMainWindowRight : .automatic
                 filterPanel.show(title: session.filterEdit?.kind.rawValue ?? "Filter", content: FilterSheet(session: session),
                                  placement: placement)
             }
