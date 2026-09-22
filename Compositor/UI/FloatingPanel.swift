@@ -22,7 +22,10 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var dismissing = false
     private var placement: FloatingPanelPlacement = .automatic
-    private var frameObserver: NSObjectProtocol?
+    private var frameObservers: [NSObjectProtocol] = []
+    /// The document window a docked panel is copied from. Kept so a move still tracks that window
+    /// after the panel itself has become key.
+    private weak var dockedWindow: NSWindow?
 
     init(name: String) {
         self.name = name
@@ -118,7 +121,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     }
 
     private func applyDockedFrame(panel: NSPanel) {
-        guard let window = NSApp.mainWindow ?? NSApp.keyWindow else {
+        guard let window = dockedWindow ?? documentWindow() else {
             panel.center()
             return
         }
@@ -128,18 +131,29 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         panel.setFrame(panelFrame, display: true)
     }
 
+    /// The document window, never the panel itself. A docked panel is key while it is open.
+    private func documentWindow() -> NSWindow? {
+        let candidate = NSApp.mainWindow ?? NSApp.keyWindow
+        return candidate === panel ? nil : candidate
+    }
+
     private func installFrameObserver(for panel: NSPanel) {
         removeFrameObserver()
-        guard let window = NSApp.mainWindow ?? NSApp.keyWindow else { return }
-        frameObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+        guard let window = documentWindow() else { return }
+        dockedWindow = window
+        let follow = { [weak self] (_: Notification) in
             guard let self, let panel = self.panel, panel.isVisible, self.placement == .dockedToMainWindowRight else { return }
             self.applyDockedFrame(panel: panel)
+        }
+        for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification] {
+            frameObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main, using: follow))
         }
     }
 
     private func removeFrameObserver() {
-        if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
-        frameObserver = nil
+        for observer in frameObservers { NotificationCenter.default.removeObserver(observer) }
+        frameObservers.removeAll()
+        dockedWindow = nil
     }
 
     func windowWillClose(_ notification: Notification) {

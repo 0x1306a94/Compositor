@@ -107,4 +107,28 @@ struct FloatingPanelTests {
         window.close()
     }
 
+    /// Dragging the document window posts a move, not a resize. The docked panel has to follow both.
+    @Test func dockedPlacementFollowsTheDocumentWindow() throws {
+        let window = NSWindow(contentRect: NSRect(x: 120, y: 140, width: 900, height: 700),
+                              styleMask: [.titled, .resizable, .closable], backing: .buffered, defer: false)
+        window.makeKeyAndOrderFront(nil)
+        let controller = FloatingPanelController(name: "testDockedFilterFollows")
+        controller.show(title: "Camera Raw Filter", content: Text("Camera Raw"), placement: .dockedToMainWindowRight)
+        settle()
+        let panel = try #require(NSApp.windows.first { $0.identifier == controller.identifier })
+        #expect(abs(panel.frame.maxX - window.frame.maxX) < 2 && abs(panel.frame.minY - window.frame.minY) < 2)
+
+        window.setFrameOrigin(NSPoint(x: window.frame.origin.x + 90, y: window.frame.origin.y + 50))
+        settle()
+        #expect(abs(panel.frame.maxX - window.frame.maxX) < 2 && abs(panel.frame.minY - window.frame.minY) < 2,
+                "the panel stays on the window's right edge after a drag")
+        let height = window.frame.height
+        window.setFrame(NSRect(x: window.frame.origin.x, y: window.frame.origin.y, width: window.frame.width, height: height - 80), display: true)
+        settle()
+        #expect(abs(panel.frame.height - window.frame.height) < 2 && abs(panel.frame.maxX - window.frame.maxX) < 2,
+                "the panel still matches the window after a resize")
+        controller.close()
+        window.close()
+    }
+
 }
