@@ -1,6 +1,14 @@
 import AppKit
 import SwiftUI
 
+/// Where a panel opens the first time (or each time, for docked styles).
+enum FloatingPanelPlacement: Sendable {
+    /// Centered on the canvas, or the last position the user left the panel.
+    case automatic
+    /// Full height of the main document window, flush against its right edge.
+    case dockedToMainWindowRight
+}
+
 /// A movable, non-modal panel for tool dialogs: it never dims the editor, opens centered on
 /// the canvas the first time, and reopens wherever it was last left (for the app session).
 /// The close button reports through `onClose` so callers can treat it as Cancel.
@@ -13,13 +21,16 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     var onClose: (() -> Void)?
     private var panel: NSPanel?
     private var dismissing = false
+    private var placement: FloatingPanelPlacement = .automatic
+    private var frameObserver: NSObjectProtocol?
 
     init(name: String) {
         self.name = name
         identifier = NSUserInterfaceItemIdentifier(name)
     }
 
-    func show(title: String, content: some View) {
+    func show(title: String, content: some View, placement: FloatingPanelPlacement = .automatic) {
+        self.placement = placement
         let panel = self.panel ?? makePanel()
         let wasVisible = panel.isVisible
         let topLeft = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
@@ -29,18 +40,30 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         // and SwiftUI's measurement invalidates layout re-entrantly, which AppKit treats
         // as a fatal exception.
         let host = NSHostingView(rootView: AnyView(content.roundedControls()))
-        let size = host.fittingSize
+        // Docked panels fill the window we size. An intrinsic SwiftUI height of zero (a scroll view
+        // waiting for a proposed height) must not collapse the content.
+        if placement == .dockedToMainWindowRight {
+            host.sizingOptions = []
+            host.autoresizingMask = [.width, .height]
+        }
         panel.contentView = host
-        if size.width > 0, size.height > 0 { panel.setContentSize(size) }
-        if wasVisible {
-            panel.setFrameTopLeftPoint(topLeft) // Content changes must not shift the panel.
-        } else if let saved = Self.positions[name] {
-            panel.setFrameTopLeftPoint(saved)
-        } else if let center = (NSApp.mainWindow ?? NSApp.keyWindow).flatMap(Self.canvasCenter) {
-            let size = panel.frame.size
-            panel.setFrameOrigin(NSPoint(x: center.x - size.width / 2, y: center.y - size.height / 2))
+        if placement == .dockedToMainWindowRight {
+            applyDockedFrame(panel: panel)
+            installFrameObserver(for: panel)
         } else {
-            panel.center()
+            removeFrameObserver()
+            let size = host.fittingSize
+            if size.width > 0, size.height > 0 { panel.setContentSize(size) }
+            if wasVisible {
+                panel.setFrameTopLeftPoint(topLeft) // Content changes must not shift the panel.
+            } else if let saved = Self.positions[name] {
+                panel.setFrameTopLeftPoint(saved)
+            } else if let center = (NSApp.mainWindow ?? NSApp.keyWindow).flatMap(Self.canvasCenter) {
+                let size = panel.frame.size
+                panel.setFrameOrigin(NSPoint(x: center.x - size.width / 2, y: center.y - size.height / 2))
+            } else {
+                panel.center()
+            }
         }
         panel.makeKeyAndOrderFront(nil)
         remember(panel)
@@ -50,6 +73,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     func close() {
         guard let panel, panel.isVisible else { return }
         remember(panel)
+        removeFrameObserver()
         dismissing = true
         panel.orderOut(nil)
         dismissing = false
@@ -86,7 +110,33 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
-        if let panel, panel.isVisible { remember(panel) }
+        guard let panel, panel.isVisible else { return }
+        if placement != .dockedToMainWindowRight { remember(panel) }
+    }
+
+    private func applyDockedFrame(panel: NSPanel) {
+        guard let window = NSApp.mainWindow ?? NSApp.keyWindow else {
+            panel.center()
+            return
+        }
+        let width: CGFloat = 440
+        let frame = window.frame
+        let panelFrame = NSRect(x: frame.maxX - width, y: frame.minY, width: width, height: frame.height)
+        panel.setFrame(panelFrame, display: true)
+    }
+
+    private func installFrameObserver(for panel: NSPanel) {
+        removeFrameObserver()
+        guard let window = NSApp.mainWindow ?? NSApp.keyWindow else { return }
+        frameObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+            guard let self, let panel = self.panel, panel.isVisible, self.placement == .dockedToMainWindowRight else { return }
+            self.applyDockedFrame(panel: panel)
+        }
+    }
+
+    private func removeFrameObserver() {
+        if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
+        frameObserver = nil
     }
 
     func windowWillClose(_ notification: Notification) {

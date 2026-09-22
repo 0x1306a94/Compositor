@@ -69,7 +69,12 @@ final class CanvasView: NSView {
     private var displayedTargeting = false
     private var optionHeld = false
     private var palettePicking: Bool { session.tool == .eyedropper || (optionHeld && (session.tool == .brush || session.tool == .spotHealing || session.tool == .gradient) && session.brushStroke == nil && gradientDrag == nil) }
-    private var picking: Bool { palettePicking || session.colorPicker != nil || session.hueSampleMode != nil || session.levels?.sampleMode != nil }
+    private var picking: Bool {
+        palettePicking || session.colorPicker != nil || session.hueSampleMode != nil || session.levels?.sampleMode != nil
+            || session.filterEdit?.samplesWhiteBalance == true || session.filterEdit?.samplesPointColor == true
+            || session.filterEdit?.samplesDefringe == true
+            || session.filterEdit?.drawingCameraRawGeometryGuide == true
+    }
     /// View point where a targeted-adjustment drag began.
     private var hueTargetStart: CGPoint?
     private var samplingColor = false
@@ -1205,6 +1210,7 @@ final class CanvasView: NSView {
     }
     override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }
     override func mouseExited(with event: NSEvent) {
+        session.filterEdit?.cameraRawReadout = nil
         brushPointer = nil
         updateBrushCursor()
         // Tools set their cursor directly while over the canvas, so put the arrow back on the
@@ -1212,6 +1218,10 @@ final class CanvasView: NSView {
         if NSEvent.pressedMouseButtons == 0 { NSCursor.arrow.set() }
     }
     override func mouseMoved(with event: NSEvent) {
+        if session.filterEdit?.kind == .cameraRaw, let document = session.document {
+            let point = convert(event.locationInWindow, from: nil)
+            session.updateCameraRawReadout(at: session.viewport.documentPoint(from: point, documentSize: document.size))
+        }
         optionHeld = event.modifierFlags.contains(.option)
         if picking { Self.eyedropperCursor.set(); return }
         if session.tool.isSelectionTool {
@@ -1346,6 +1356,30 @@ final class CanvasView: NSView {
         window?.makeFirstResponder(self)
         guard session.document != nil, !session.isProjectBusy, !session.isImporting else { return }
         let point = convert(event.locationInWindow, from: nil)
+        if session.filterEdit?.samplesWhiteBalance == true, !spaceHeld, let document = session.document {
+            session.sampleCameraRawWhiteBalance(at: session.viewport.documentPoint(from: point, documentSize: document.size))
+            FloatingPanelController.refocus(NSUserInterfaceItemIdentifier("filterPanel"))
+            return
+        }
+        if session.filterEdit?.samplesPointColor == true, !spaceHeld, let document = session.document {
+            session.sampleCameraRawPointColor(at: session.viewport.documentPoint(from: point, documentSize: document.size))
+            FloatingPanelController.refocus(NSUserInterfaceItemIdentifier("filterPanel"))
+            return
+        }
+        if session.filterEdit?.samplesDefringe == true, !spaceHeld, let document = session.document {
+            session.sampleCameraRawDefringe(at: session.viewport.documentPoint(from: point, documentSize: document.size))
+            FloatingPanelController.refocus(NSUserInterfaceItemIdentifier("filterPanel"))
+            return
+        }
+        if session.filterEdit?.drawingCameraRawGeometryGuide == true, !spaceHeld, let document = session.document {
+            session.beginCameraRawGeometryGuide(at: session.viewport.documentPoint(from: point, documentSize: document.size))
+            return
+        }
+        if (session.filterEdit?.targetsCameraRawCurve == true || session.filterEdit?.targetsCameraRawMixer == true),
+           !spaceHeld, let document = session.document {
+            session.beginCameraRawDrag(at: session.viewport.documentPoint(from: point, documentSize: document.size))
+            return
+        }
         if session.levels?.sampleMode != nil, !spaceHeld, let document = session.document {
             session.sampleLevels(at: session.viewport.documentPoint(from: point, documentSize: document.size))
             FloatingPanelController.refocus(NSUserInterfaceItemIdentifier("levelsPanel"))
@@ -1414,6 +1448,15 @@ final class CanvasView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if session.filterEdit?.drawingCameraRawGeometryGuide == true, session.filterEdit?.cameraRawGuideDraft != nil,
+           let document = session.document {
+            session.continueCameraRawGeometryGuide(to: session.viewport.documentPoint(from: point, documentSize: document.size))
+            return
+        }
+        if session.filterEdit?.cameraRawDrag != nil, let document = session.document {
+            session.dragCameraRaw(to: session.viewport.documentPoint(from: point, documentSize: document.size))
+            return
+        }
         if textBoxAnchor != nil { dragTextGesture(to: point); return }
         if var drag = zoomDrag {
             let dx = point.x - drag.start.x
@@ -1572,6 +1615,10 @@ final class CanvasView: NSView {
         window?.invalidateCursorRects(for: self)
     }
     override func mouseUp(with event: NSEvent) {
+        if session.filterEdit?.cameraRawGuideDraft != nil {
+            session.commitCameraRawGeometryGuide()
+        }
+        session.filterEdit?.cameraRawDrag = nil
         if textBoxAnchor != nil { finishTextGesture(); return }
         stopMarqueeAutoscroll()
         if let drag = zoomDrag {
