@@ -3,8 +3,8 @@ import CoreImage
 
 nonisolated enum AdjustmentKind: String, Codable, CaseIterable, Sendable {
     case hsv = "Hue/Saturation", levels = "Levels", curves = "Curves"
-    case exposure = "Exposure", gradientMap = "Gradient Map", grain = "Grain"
-    case gaussianBlur = "Gaussian Blur", motionBlur = "Motion Blur", addNoise = "Add Noise"
+    case exposure = "Exposure", gradientMap = "Gradient Map", grain = "Grain", addNoise = "Add Noise"
+    case gaussianBlur = "Gaussian Blur", motionBlur = "Motion Blur"
     case invert = "Invert"
     case blackWhite = "Black & White", colorBalance = "Color Balance"
     var symbol: String {

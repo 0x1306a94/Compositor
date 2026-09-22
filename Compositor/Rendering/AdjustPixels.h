@@ -8,7 +8,7 @@
 void adjust_gradient_map(uint8_t *rgba, size_t width, size_t height, size_t stride, const uint8_t *table);
 // Film grain on premultiplied RGBA pixels: the same brightness change on all three channels, strongest
 // in the midtones. `amount` is 0–100, `size` the grain's scale in document units, and `roughness`
-// (0–100) mixes in per-unit noise. Pixel (x, y) sits at (originX + (x + 0.5) × unitsPerPixel,
+// (0–100) adds smaller irregular particles whose scale remains relative to `size`. Pixel (x, y) sits at (originX + (x + 0.5) × unitsPerPixel,
 // originY + (y + 0.5) × unitsPerPixel), and its grain depends only on that position and `seed`, so a
 // piece of an image gets the same grain as that part of the whole.
 void adjust_grain(uint8_t *rgba, size_t width, size_t height, size_t stride, double amount, double size,
