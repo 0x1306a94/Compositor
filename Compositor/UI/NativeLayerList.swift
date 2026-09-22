@@ -41,7 +41,7 @@ struct NativeLayerList: NSViewRepresentable {
         if let table = scroll.documentView as? NSTableView { context.coordinator.update(table) }
     }
 
-    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuItemValidation {
         static let layerType = NSPasteboard.PasteboardType("com.compositor.layer-row")
         /// An Option-drag from a mask thumbnail: the id of the layer whose mask is being copied.
         static let effectType = NSPasteboard.PasteboardType("com.compositor.layer-effect")
@@ -110,16 +110,21 @@ struct NativeLayerList: NSViewRepresentable {
 
         func contextMenu(for row: Int) -> NSMenu? {
             guard rows.indices.contains(row) else { return nil }
+            if session.selectedLayerIDs.isEmpty {
+                session.selectLayer(rows[row].id)
+            }
             let menu = NSMenu()
 
             // 1. Duplicate Layer
             let duplicateItem = NSMenuItem(title: "Duplicate Layer", action: #selector(duplicateLayerAction), keyEquivalent: "")
             duplicateItem.target = self
+            duplicateItem.isEnabled = validateMenuItem(duplicateItem)
             menu.addItem(duplicateItem)
 
             // 2. Rename…
             let renameItem = NSMenuItem(title: "Rename…", action: #selector(renameLayerAction), keyEquivalent: "")
             renameItem.target = self
+            renameItem.isEnabled = validateMenuItem(renameItem)
             menu.addItem(renameItem)
 
             // 3. Delete Layer / Delete Selected Layers
@@ -133,6 +138,7 @@ struct NativeLayerList: NSViewRepresentable {
             }
             let deleteItem = NSMenuItem(title: deleteTitle, action: #selector(deleteLayerAction), keyEquivalent: "")
             deleteItem.target = self
+            deleteItem.isEnabled = validateMenuItem(deleteItem)
             menu.addItem(deleteItem)
 
             menu.addItem(NSMenuItem.separator())
@@ -141,21 +147,25 @@ struct NativeLayerList: NSViewRepresentable {
             let clippingTitle = session.activeLayer?.maskSourceID != nil ? "Release Clipping Mask" : "Create Clipping Mask"
             let clippingItem = NSMenuItem(title: clippingTitle, action: #selector(toggleClippingMaskAction), keyEquivalent: "")
             clippingItem.target = self
+            clippingItem.isEnabled = validateMenuItem(clippingItem)
             menu.addItem(clippingItem)
 
             // 5. Group Selected Layers
             let groupItem = NSMenuItem(title: "Group Selected Layers", action: #selector(groupSelectedLayersAction), keyEquivalent: "")
             groupItem.target = self
+            groupItem.isEnabled = validateMenuItem(groupItem)
             menu.addItem(groupItem)
 
             // 6. Move Out of Folder
             let moveOutItem = NSMenuItem(title: "Move Out of Folder", action: #selector(moveOutOfFolderAction), keyEquivalent: "")
             moveOutItem.target = self
+            moveOutItem.isEnabled = validateMenuItem(moveOutItem)
             menu.addItem(moveOutItem)
 
             // 7. Merge Down / Merge Layers / Merge Group
             let mergeItem = NSMenuItem(title: session.mergeTitle, action: #selector(mergeLayersAction), keyEquivalent: "")
             mergeItem.target = self
+            mergeItem.isEnabled = validateMenuItem(mergeItem)
             menu.addItem(mergeItem)
 
             menu.addItem(NSMenuItem.separator())
@@ -165,28 +175,34 @@ struct NativeLayerList: NSViewRepresentable {
             let addMaskSubmenu = NSMenu(title: "Add Mask")
             let revealAllItem = NSMenuItem(title: "Reveal All (White)", action: #selector(addWhiteMaskAction), keyEquivalent: "")
             revealAllItem.target = self
+            revealAllItem.isEnabled = validateMenuItem(revealAllItem)
             addMaskSubmenu.addItem(revealAllItem)
             let hideAllItem = NSMenuItem(title: "Hide All (Black)", action: #selector(addBlackMaskAction), keyEquivalent: "")
             hideAllItem.target = self
+            hideAllItem.isEnabled = validateMenuItem(hideAllItem)
             addMaskSubmenu.addItem(hideAllItem)
             addMaskItem.submenu = addMaskSubmenu
+            addMaskItem.isEnabled = session.canEditMask && session.activeLayer?.mask == nil
             menu.addItem(addMaskItem)
 
             // 9. Enable Mask / Disable Mask
             let toggleMaskTitle = session.activeLayer?.mask?.isEnabled == false ? "Enable Mask" : "Disable Mask"
             let toggleMaskItem = NSMenuItem(title: toggleMaskTitle, action: #selector(toggleMaskAction), keyEquivalent: "")
             toggleMaskItem.target = self
+            toggleMaskItem.isEnabled = validateMenuItem(toggleMaskItem)
             menu.addItem(toggleMaskItem)
 
             // 10. Delete Mask
             let deleteMaskItem = NSMenuItem(title: "Delete Mask", action: #selector(deleteMaskAction), keyEquivalent: "")
             deleteMaskItem.target = self
+            deleteMaskItem.isEnabled = validateMenuItem(deleteMaskItem)
             menu.addItem(deleteMaskItem)
 
             // 11. Link Mask / Unlink Mask
             let linkMaskTitle = session.activeLayer?.mask?.isLinked == false ? "Link Mask" : "Unlink Mask"
             let linkMaskItem = NSMenuItem(title: linkMaskTitle, action: #selector(toggleMaskLinkAction), keyEquivalent: "")
             linkMaskItem.target = self
+            linkMaskItem.isEnabled = validateMenuItem(linkMaskItem)
             menu.addItem(linkMaskItem)
 
             menu.addItem(NSMenuItem.separator())
@@ -194,15 +210,53 @@ struct NativeLayerList: NSViewRepresentable {
             // 12. Layer Effects…
             let effectsItem = NSMenuItem(title: "Layer Effects…", action: #selector(layerEffectsAction), keyEquivalent: "")
             effectsItem.target = self
+            effectsItem.isEnabled = validateMenuItem(effectsItem)
             menu.addItem(effectsItem)
 
             // 13. Hide Layer / Show Layer
             let visibilityTitle = session.activeLayer?.isVisible == false ? "Show Layer" : "Hide Layer"
             let visibilityItem = NSMenuItem(title: visibilityTitle, action: #selector(toggleVisibilityAction), keyEquivalent: "")
             visibilityItem.target = self
+            visibilityItem.isEnabled = validateMenuItem(visibilityItem)
             menu.addItem(visibilityItem)
 
             return menu
+        }
+
+        func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+            switch menuItem.action {
+            case #selector(duplicateLayerAction):
+                return session.canEditLayers && session.activeLayer != nil
+            case #selector(renameLayerAction):
+                return session.canEditLayers && session.activeLayer != nil && session.selectedLayerIDs.count == 1
+            case #selector(deleteLayerAction):
+                return session.canEditLayers && session.activeLayer != nil
+            case #selector(toggleClippingMaskAction):
+                return session.activeLayerID.map { session.canToggleClippingMask($0) } ?? false
+            case #selector(groupSelectedLayersAction):
+                return session.canEditLayers && session.document != nil && (session.document?.layers.count ?? 0) < 10_000 && !session.selectedLayerIDs.isEmpty
+            case #selector(moveOutOfFolderAction):
+                return session.canEditLayers && session.activeLayer?.parentID != nil
+            case #selector(mergeLayersAction):
+                return session.canMergeLayers
+            case #selector(addWhiteMaskAction), #selector(addBlackMaskAction):
+                return session.canEditMask && session.activeLayer?.mask == nil
+            case #selector(toggleMaskAction):
+                return session.canEditMask && session.activeLayer?.mask != nil
+            case #selector(deleteMaskAction):
+                return session.canEditMask && session.activeLayer?.mask != nil
+            case #selector(toggleMaskLinkAction):
+                return session.canEditLayers && session.activeLayer?.mask != nil && session.activeLayer?.isGroup == false && session.activeLayer?.adjustment == nil
+            case #selector(layerEffectsAction):
+                return session.canEditEffects
+            case #selector(toggleVisibilityAction):
+                return session.canEditLayers && session.activeLayer != nil
+            default:
+                if menuItem.submenu != nil && menuItem.title == "Add Mask" {
+                    return session.canEditMask && session.activeLayer?.mask == nil
+                }
+                return true
+            }
         }
 
         @objc func duplicateLayerAction(_ sender: Any?) {
