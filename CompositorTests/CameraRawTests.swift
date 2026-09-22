@@ -254,6 +254,30 @@ struct CameraRawTests {
         #expect(abs(baked[0] - 176) <= 2, "OK bakes the grade: \(baked)")
     }
 
+    /// OK stores the grade the eye left in the layer. A hidden slider must not come back on the next open.
+    @Test func hiddenGroupStaysOutOfTheNextOpen() async throws {
+        let input = try gray(width: 8, height: 8)
+        let session = EditorSession()
+        session.createDocument(width: 8, height: 8)
+        session.insert(ImportedImage(image: input, thumbnail: input, name: "Gray"))
+        session.beginFilter(.cameraRaw)
+        var editSettings = try #require(session.filterEdit).settings
+        editSettings.cameraRaw.exposure = 1
+        editSettings.cameraRaw.temperature = 40
+        session.updateFilter(editSettings, preview: true)
+        session.filterEdit?.showsCameraRawLight = false
+        await session.commitFilter()
+        let baked = try pixels(try #require(session.activeLayer?.asset?.image))
+        let source = try pixels(input)
+        #expect(baked != source)
+
+        session.beginFilter(.cameraRaw)
+        let restored = try #require(session.filterEdit).settings.cameraRaw
+        #expect(restored.exposure == 0)
+        #expect(restored.temperature == 40)
+        session.cancelFilter()
+    }
+
     /// A wide step from 40 to 200, so a small blur and a wide blur reach different pixels.
     private func step() throws -> CGImage {
         let width = 24

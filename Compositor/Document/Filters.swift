@@ -478,14 +478,18 @@ extension EditorSession {
             guard filterEdit === edit, !edit.committing, edit.preparedPreview != nil, edit.previewError == nil else { return }
             // Remove Background masks from the full-size image, so a preview made at preview size is fine to discard.
         }
+        // A hidden Camera Raw group is absent from the layer. Remember that rendered grade, including
+        // when every remaining amount is zero, so the next open does not put the hidden sliders back.
+        let rendered = edit.renderSettings()
+        if edit.kind == .cameraRaw { filterSettings = rendered }
         // No distortion to remove: close as Cancel does, without an undo step.
         if (edit.kind == .lensCorrection && edit.settings.distortion == 0)
             || (edit.kind == .exposure && edit.settings.exposure == ExposureSettings())
             || (edit.kind == .grain && edit.settings.grain.amount == 0)
-            || (edit.kind == .cameraRaw && edit.renderSettings().cameraRaw.isIdentity) { cancelFilter(); return }
+            || (edit.kind == .cameraRaw && rendered.cameraRaw.isIdentity) { cancelFilter(); return }
         edit.committing = true
         edit.previewTask?.cancel()
-        filterSettings = edit.settings
+        if edit.kind != .cameraRaw { filterSettings = edit.settings }
         isProjectBusy = true
         // The preview stays up until the result is on the layer, so the canvas never flashes the original.
         defer { filterEdit = nil; isProjectBusy = false; brushRevision += 1 }
