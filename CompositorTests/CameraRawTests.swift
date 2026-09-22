@@ -308,6 +308,21 @@ struct CameraRawTests {
     }
 
     /// A wide step from 40 to 200, so a small blur and a wide blur reach different pixels.
+    /// A checkerboard, for the geometry and optics tests: a warp moves pixels, so it can only be seen
+    /// in an image whose pixels differ. A flat fill comes back byte-identical however hard it is bent.
+    private func checker(_ width: Int = 24, _ height: Int = 24) throws -> CGImage {
+        let context = try BrushRaster.context(width: width, height: height, mask: false)
+        for y in 0..<height {
+            for x in 0..<width {
+                let light = ((x / 2) + (y / 2)) % 2 == 0
+                context.setFillColor(CGColor(srgbRed: light ? 0.9 : 0.1, green: light ? 0.9 : 0.1,
+                                             blue: light ? 0.9 : 0.1, alpha: 1))
+                context.fill(CGRect(x: x, y: y, width: 1, height: 1))
+            }
+        }
+        return try #require(context.makeImage())
+    }
+
     private func step() throws -> CGImage {
         let width = 24
         let context = try BrushRaster.context(width: width, height: 4, mask: false)
@@ -557,12 +572,13 @@ struct CameraRawTests {
     }
 
     @Test func opticsDistortionDefringeAndDetailEye() throws {
-        let stepped = try step()
+        let stepped = try checker()
         var settings = CameraRawSettings()
         settings.optics.distortion = 100
         let warped = try settings.apply(stepped)
         let warpedPixels = try pixels(warped)
         let steppedPixels = try pixels(stepped)
+        // Not the step image: its one edge sits at the centre, where a radial distortion moves nothing.
         #expect(warpedPixels != steppedPixels, "distortion resamples pixels")
 
         let purple = try image(red: 0.8, green: 0.2, blue: 0.9)
@@ -587,7 +603,7 @@ struct CameraRawTests {
     }
 
     @Test func geometryWarpAndCalibrationPrimaries() throws {
-        let grid = try image(width: 12, height: 12, red: 0.4, green: 0.4, blue: 0.4)
+        let grid = try checker(12, 12)
         var settings = CameraRawSettings()
         settings.geometry.vertical = 40
         let warped = try settings.geometry.apply(grid)

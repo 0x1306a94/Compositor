@@ -687,7 +687,10 @@ void adjust_camera_raw_curve_color(uint8_t *rgba, size_t width, size_t height, s
             }
             if (h < 0) h += 1; if (h >= 1) h -= 1;
             hsl_to_rgb(h, s, l, &r, &g, &b);
-            double split = 0.5 + balance * 0.2;
+            // Balance moves the crossover between the shadow and highlight wheels. Toward highlights
+            // it has to move down, so more of the picture counts as highlight and the shadow wheel
+            // loses its hold; the other sign strengthened the shadow tint it was meant to weaken.
+            double split = 0.5 - balance * 0.2;
             double reach = 0.12 + blending * 0.38;
             double shadowW = camera_clamp((split + reach - rec709(r, g, b)) / fmax(0.05, reach * 2));
             double highlightW = camera_clamp((rec709(r, g, b) - (split - reach)) / fmax(0.05, reach * 2));
