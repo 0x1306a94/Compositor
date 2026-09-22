@@ -8,6 +8,9 @@ nonisolated enum FilterKind: String, CaseIterable, Sendable {
     case gaussianBlur = "Gaussian Blur"
     case motionBlur = "Motion Blur"
     case addNoise = "Add Noise"
+    case vignette = "Vignette"
+    case bloomGlow = "Bloom / Glow"
+    case tonalContrast = "Tonal Contrast"
     case lensCorrection = "Lens Correction"
     case cameraRaw = "Camera Raw Filter"
     case removeBackground = "Remove Background"
@@ -47,6 +50,22 @@ nonisolated struct FilterSettings: Equatable, Sendable {
     var gaussian = false
     /// Add Noise changes brightness only, the same amount on every channel.
     var monochromatic = false
+    /// Standalone vignette: edge color, strength, and shape of its falloff.
+    var vignetteAmount: Double = 35
+    var vignetteColor = AdjustmentColor(red: 0, green: 0, blue: 0)
+    var vignetteMidpoint: Double = 50
+    var vignetteRoundness: Double = 0
+    var vignetteFeather: Double = 60
+    var vignetteHighlights: Double = 25
+    /// Bloom / Glow: strength and blur radius in layer pixels.
+    var bloomAmount: Double = 40
+    var bloomRadius: Double = 24
+    /// Tonal Contrast: one local-detail radius and separate tonal strengths.
+    var tonalAmount: Double = 50
+    var tonalRadius: Double = 16
+    var tonalShadows: Double = 40
+    var tonalMidtones: Double = 60
+    var tonalHighlights: Double = 30
     /// Lens Correction's Remove Distortion, −100–100: positive straightens barrel distortion
     /// (lines bowing outward), negative straightens pincushion (lines bowing inward).
     var distortion: Double = 0
@@ -74,6 +93,19 @@ nonisolated struct FilterSettings: Equatable, Sendable {
         result.angle = clamp(angle, -90...90, 0)
         result.distance = clamp(distance, 1...2000, 10)
         result.amount = clamp(amount, 0.1...400, 10)
+        result.vignetteAmount = clamp(vignetteAmount, 0...100, 35)
+        result.vignetteColor = vignetteColor.clamped
+        result.vignetteMidpoint = clamp(vignetteMidpoint, 0...100, 50)
+        result.vignetteRoundness = clamp(vignetteRoundness, -100...100, 0)
+        result.vignetteFeather = clamp(vignetteFeather, 0...100, 60)
+        result.vignetteHighlights = clamp(vignetteHighlights, 0...100, 25)
+        result.bloomAmount = clamp(bloomAmount, 0...100, 40)
+        result.bloomRadius = clamp(bloomRadius, 1...150, 24)
+        result.tonalAmount = clamp(tonalAmount, 0...100, 50)
+        result.tonalRadius = clamp(tonalRadius, 1...100, 16)
+        result.tonalShadows = clamp(tonalShadows, -100...100, 40)
+        result.tonalMidtones = clamp(tonalMidtones, -100...100, 60)
+        result.tonalHighlights = clamp(tonalHighlights, -100...100, 30)
         result.distortion = clamp(distortion, -100...100, 0)
         result.refineEdges = clamp(refineEdges, 0...40, 12)
         result.matteContrast = clamp(matteContrast, 0...100, 25)
@@ -181,6 +213,37 @@ nonisolated enum PixelFilter {
                          Int64(job.noiseOrigin.x.rounded(.down)), Int64(job.noiseOrigin.y.rounded(.down)))
             guard let noisy = context.makeImage() else { throw ExportError.render }
             image = noisy
+        case .vignette:
+            let context = try BrushRaster.context(width: width, height: height, mask: false)
+            BrushRaster.draw(job.image, in: extent, mask: false, context: context)
+            guard let data = context.data else { throw ExportError.render }
+            adjust_colored_vignette(data.assumingMemoryBound(to: UInt8.self), width, height, context.bytesPerRow,
+                                    settings.vignetteAmount, settings.vignetteMidpoint, settings.vignetteRoundness,
+                                    settings.vignetteFeather, settings.vignetteHighlights,
+                                    settings.vignetteColor.red, settings.vignetteColor.green, settings.vignetteColor.blue)
+            guard let result = context.makeImage() else { throw ExportError.render }
+            image = result
+        case .bloomGlow:
+            let bloomed = edges.applyingFilter("CIBloom", parameters: [
+                kCIInputRadiusKey: settings.bloomRadius * job.scale,
+                kCIInputIntensityKey: settings.bloomAmount / 50,
+            ])
+            image = try PixelAdjust.render(bloomed.cropped(to: extent), width: width, height: height, isMask: false)
+        case .tonalContrast:
+            let blurred = edges.applyingGaussianBlur(sigma: settings.tonalRadius * job.scale)
+            let base = try PixelAdjust.render(blurred.cropped(to: extent), width: width, height: height, isMask: false)
+            let context = try BrushRaster.context(width: width, height: height, mask: false)
+            let baseContext = try BrushRaster.context(width: width, height: height, mask: false)
+            BrushRaster.draw(job.image, in: extent, mask: false, context: context)
+            BrushRaster.draw(base, in: extent, mask: false, context: baseContext)
+            guard let data = context.data, let baseData = baseContext.data else { throw ExportError.render }
+            adjust_tonal_contrast(data.assumingMemoryBound(to: UInt8.self),
+                                  baseData.assumingMemoryBound(to: UInt8.self),
+                                  width, height, context.bytesPerRow, baseContext.bytesPerRow,
+                                  settings.tonalAmount, settings.tonalShadows,
+                                  settings.tonalMidtones, settings.tonalHighlights)
+            guard let result = context.makeImage() else { throw ExportError.render }
+            image = result
         case .lensCorrection:
             // The warp is relative to the image's own size, so a downscaled preview bends the same way.
             let source = try BrushRaster.context(width: width, height: height, mask: false)
@@ -268,6 +331,8 @@ final class FilterEdit {
     /// RGB of the pixel under the pointer, in the adjusted preview.
     var cameraRawReadout: (red: Int, green: Int, blue: Int)?
     @ObservationIgnored var preparedPreview: CGImage?
+    /// Reject a render started before the blur's padded pixel grid changed.
+    @ObservationIgnored var previewSourceVersion: UInt64 = 0
     /// The settings `preparedPreview` was made with, for the automatic filters that have settings of their own.
     @ObservationIgnored var preparedSettings: FilterSettings?
     @ObservationIgnored var pending: FilterJob?
@@ -299,6 +364,7 @@ final class FilterEdit {
         switch kind {
         case .gaussianBlur: return CGFloat(settings.radius * 3 + 2)
         case .motionBlur: return CGFloat(settings.distance / 2 + 2)
+        case .bloomGlow: return CGFloat(settings.bloomRadius * 3 + 2)
         default: return 0
         }
     }
@@ -358,6 +424,7 @@ final class FilterEdit {
         previewSource = ready.previewSource
         previewScale = ready.previewScale
         previewMapping = ready.previewMapping
+        previewSourceVersion &+= 1
     }
 
     func previewImage(for id: UUID) -> CGImage? { preview && id == layerID ? preparedPreview : nil }
@@ -438,6 +505,7 @@ extension EditorSession {
     private func renderFilterPreview(_ edit: FilterEdit) {
         guard filterEdit === edit, edit.previewTask == nil, let job = edit.pending else { return }
         edit.pending = nil
+        let sourceVersion = edit.previewSourceVersion
         edit.preparing = true
         edit.previewError = nil
         edit.previewTask = Task { @MainActor [weak self, weak edit] in
@@ -455,6 +523,10 @@ extension EditorSession {
             guard let self, let edit, self.filterEdit === edit, !Task.isCancelled else { return }
             edit.previewTask = nil
             edit.preparing = false
+            guard sourceVersion == edit.previewSourceVersion else {
+                self.renderFilterPreview(edit)
+                return
+            }
             edit.previewError = result.2
             if let scope = result.1 { edit.cameraRawScope = scope }
             if edit.preview || edit.kind.isAutomatic { edit.preparedPreview = result.0; edit.preparedSettings = job.settings; self.brushRevision += 1 }
@@ -463,8 +535,9 @@ extension EditorSession {
     }
 
     func cancelFilter() {
-        // A Gradient Map color still being picked goes with the panel.
+        // A filter color still being picked goes with the panel.
         if case .gradientMap = colorPicker?.target { closeColorPicker(commit: false) }
+        if case .vignette = colorPicker?.target { closeColorPicker(commit: false) }
         if finishAdjustmentEditing(commit: false) { return }
         guard let edit = filterEdit, !edit.committing else { return }
         edit.previewTask?.cancel()
@@ -474,6 +547,7 @@ extension EditorSession {
 
     func commitFilter() async {
         if case .gradientMap = colorPicker?.target { closeColorPicker(commit: true) }
+        if case .vignette = colorPicker?.target { closeColorPicker(commit: true) }
         if finishAdjustmentEditing(commit: true) { return }
         guard let edit = filterEdit, !edit.committing else { return }
         if edit.kind.isAutomatic {
@@ -487,6 +561,10 @@ extension EditorSession {
         if edit.kind == .cameraRaw { filterSettings = rendered }
         // No distortion to remove: close as Cancel does, without an undo step.
         if (edit.kind == .lensCorrection && edit.settings.distortion == 0)
+            || (edit.kind == .vignette && edit.settings.vignetteAmount == 0)
+            || (edit.kind == .bloomGlow && edit.settings.bloomAmount == 0)
+            || (edit.kind == .tonalContrast && (edit.settings.tonalAmount == 0 ||
+                (edit.settings.tonalShadows == 0 && edit.settings.tonalMidtones == 0 && edit.settings.tonalHighlights == 0)))
             || (edit.kind == .exposure && edit.settings.exposure == ExposureSettings())
             || (edit.kind == .grain && edit.settings.grain.amount == 0)
             || (edit.kind == .cameraRaw && rendered.cameraRaw.isIdentity) { cancelFilter(); return }
@@ -504,7 +582,7 @@ extension EditorSession {
         let cached = edit.kind.isAutomatic && edit.preparedSettings == edit.settings ? edit.preparedPreview : nil
         do {
             let grown = edit.grownTransform
-            let spreads = edit.kind == .gaussianBlur || edit.kind == .motionBlur
+            let spreads = edit.kind == .gaussianBlur || edit.kind == .motionBlur || edit.kind == .bloomGlow
             let made = try await Task.detached(priority: .userInitiated) { () -> (asset: ImportedImage, transform: LayerTransform?) in
                 var image = try cached ?? PixelFilter.run(job)
                 var placed = grown
@@ -532,7 +610,8 @@ extension EditorSession {
             beginEdit(edit.kind.rawValue)
             document?.layers[index] = ImageLayer(id: current.id, asset: asset, name: current.name, isVisible: current.isVisible,
                 transform: made.transform ?? current.transform, parentID: current.parentID, isGroup: false,
-                opacity: current.opacity, blendMode: current.blendMode, mask: mask, maskSourceID: current.maskSourceID)
+                opacity: current.opacity, blendMode: current.blendMode, mask: mask, maskSourceID: current.maskSourceID,
+                effects: current.effects)
             endEdit()
         } catch { brushError = error.localizedDescription }
     }
