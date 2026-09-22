@@ -77,4 +77,34 @@ struct FloatingPanelTests {
         #expect(session.levels == nil && session.hueSaturation == nil && session.filterEdit == nil)
     }
 
+    /// Camera Raw docks to the document window. That frame must not become the place
+    /// Gaussian Blur and the other filters reopen.
+    @Test func dockedPlacementLeavesTheSavedFilterPosition() throws {
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 900, height: 700),
+                              styleMask: [.titled, .resizable, .closable], backing: .buffered, defer: false)
+        window.makeKeyAndOrderFront(nil)
+        let controller = FloatingPanelController(name: "testDockedFilterPosition")
+        controller.show(title: "Gaussian Blur", content: Text("Blur"))
+        settle()
+        let panel = try #require(NSApp.windows.first { $0.identifier == controller.identifier })
+        let parked = NSPoint(x: 40, y: 240)
+        panel.setFrameOrigin(parked)
+        let saved = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+        controller.close()
+
+        controller.show(title: "Camera Raw Filter", content: Text("Camera Raw"), placement: .dockedToMainWindowRight)
+        settle()
+        #expect(panel.isVisible)
+        #expect(abs(panel.frame.maxX - window.frame.maxX) < 2)
+        controller.close()
+
+        controller.show(title: "Gaussian Blur", content: Text("Blur"))
+        settle()
+        let restored = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+        #expect(abs(restored.x - saved.x) < 2 && abs(restored.y - saved.y) < 2,
+                "the filter panel reopens where it was left, not on the docked edge: \(restored)")
+        controller.close()
+        window.close()
+    }
+
 }

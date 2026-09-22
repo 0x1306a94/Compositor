@@ -92,7 +92,10 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         return panel
     }
 
+    /// A docked frame is copied from the document window. Remembering it would put the next
+    /// Gaussian Blur, and every other filter that shares this panel, on that right edge.
     private func remember(_ panel: NSWindow) {
+        guard placement != .dockedToMainWindowRight else { return }
         Self.positions[name] = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
     }
 
