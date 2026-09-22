@@ -124,7 +124,7 @@ struct FilterSheet: View {
             }
         }
         .padding(24)
-        .frame(width: isCameraRaw ? 440 : 380)
+        .frame(width: isCameraRaw ? FloatingPanelController.dockedWidth : 380)
         .frame(maxHeight: isCameraRaw ? .infinity : nil, alignment: .top)
         .fixedSize(horizontal: false, vertical: !isCameraRaw)
 

@@ -120,12 +120,16 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         if placement != .dockedToMainWindowRight { remember(panel) }
     }
 
+    /// Camera Raw's three grading wheels are the widest thing a docked panel holds; their own
+    /// sliders are narrowed to fit this rather than the panel being widened to fit them.
+    static let dockedWidth: CGFloat = 440
+
     private func applyDockedFrame(panel: NSPanel) {
         guard let window = dockedWindow ?? documentWindow() else {
             panel.center()
             return
         }
-        let width: CGFloat = 440
+        let width = Self.dockedWidth
         let frame = window.frame
         let panelFrame = NSRect(x: frame.maxX - width, y: frame.minY, width: width, height: frame.height)
         panel.setFrame(panelFrame, display: true)

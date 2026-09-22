@@ -104,6 +104,19 @@ struct FloatingPanelTests {
         controller.close()
     }
 
+    /// The docked panel has to be wide enough for the widest thing it holds. Camera Raw's three
+    /// grading wheels sit side by side and overflowed a 440pt panel, which showed as controls
+    /// running past its edge — nothing warns about that, so the sizes are compared here instead.
+    @Test func theDockedPanelFitsTheGradingWheels() throws {
+        let session = EditorSession()
+        session.createDocument(width: 64, height: 64)
+        let grading = NSHostingView(rootView: AnyView(CameraRawGradingControls(session: session).roundedControls()))
+        // The sheet pads 24 on each side, and the colour section is inset another 18.
+        let available = FloatingPanelController.dockedWidth - 48 - 18
+        #expect(grading.fittingSize.width <= available,
+                "grading needs \(grading.fittingSize.width), the panel leaves \(available)")
+    }
+
     /// Camera Raw docks to the document window's right edge, at its full height, and follows it.
     ///
     /// The window it docks to is whichever one the app has, not one this test makes: the test host

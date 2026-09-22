@@ -382,14 +382,17 @@ struct CameraRawGradingControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Five segments spelled out want 453 points and the docked panel has 374, so the
+            // choice is a menu rather than a row that runs past the panel's edge.
             Picker("Grading", selection: Binding(get: { page }, set: { session.filterEdit?.cameraRawGradePage = $0 })) {
                 ForEach(CameraRawGradePage.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .labelsHidden()
+            .fixedSize()
             .help("Three-Way shows shadows, midtones, and highlights. The other choices show one wheel.")
             if page == .threeWay {
-                HStack {
+                HStack(spacing: 30) {
                     wheel("Shadows", \.shadows)
                     wheel("Midtones", \.midtones)
                     wheel("Highlights", \.highlights)
@@ -426,9 +429,11 @@ struct CameraRawGradingControls: View {
             Text("\(Int(wheel.hue.rounded()))°  \(Int(wheel.saturation.rounded()))")
                 .font(.caption2.monospacedDigit())
                 .help("Hue and saturation of this wheel.")
+            // A slider asks for 120 on its own, which put three columns past the panel's edge.
             CameraRawSlider(value: wheel.luminance, range: -100...100, track: .plain, help: "Brightness added by this wheel.",
                             onChange: { value in update { $0.grading[keyPath: key].luminance = value } },
                             onReset: { update { $0.grading[keyPath: key].luminance = 0 } })
+                .frame(width: 96)
         }
     }
 
