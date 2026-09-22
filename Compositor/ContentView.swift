@@ -271,7 +271,7 @@ struct ContentView: View {
     }
     private var toolRail: some View {
         // Scrolls when the window is too short for every tool, rather than pushing the bars above and below away.
-        ScrollView(.vertical) {
+        IndicatorlessScrollView {
         VStack(spacing: 10) {
             ForEach(NavigationTool.allCases.filter { $0 != .idle }, id: \.self) { tool in
                 Button { session.selectTool(tool) } label: {
@@ -299,10 +299,8 @@ struct ContentView: View {
             ColorPaletteControls(session: session).padding(.top, 8)
         }
         .padding(.top, 16).padding(.bottom, 12)
+        .frame(width: 56)
         }
-        .scrollIndicators(.hidden)
-        // Only scrolls (and bounces) when the tools don't all fit.
-        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
         .frame(width: 56)
     }
     private var welcome: some View {
