@@ -72,6 +72,7 @@ struct CameraRawSlider: NSViewRepresentable {
         slider.action = #selector(Coordinator.changed(_:))
         slider.toolTip = help
         slider.onReset = context.coordinator.reset
+        slider.onTrackClick = context.coordinator.onChange
         (slider.cell as? GradientSliderCell)?.gradientColors = track.colors
         slider.setAccessibilityLabel(help)
         return slider
@@ -85,6 +86,7 @@ struct CameraRawSlider: NSViewRepresentable {
         context.coordinator.onChange = onChange
         context.coordinator.onReset = onReset
         slider.onReset = context.coordinator.reset
+        slider.onTrackClick = context.coordinator.onChange
         slider.toolTip = help
         slider.minValue = range.lowerBound
         slider.maxValue = range.upperBound
@@ -114,6 +116,7 @@ struct CameraRawSlider: NSViewRepresentable {
 
 final class CameraRawSliderView: NSSlider {
     var onReset: (() -> Void)?
+    var onTrackClick: ((Double) -> Void)?
     /// True while a press is being tracked, so a binding update does not fight the drag.
     private(set) var isTrackingValue = false
 
@@ -126,8 +129,37 @@ final class CameraRawSliderView: NSSlider {
         // A synthetic click with the button already up must not enter tracking: that loop waits for a mouse-up that never arrives.
         guard NSEvent.pressedMouseButtons & 1 != 0 else { return }
         isTrackingValue = true
+        if !isOnKnob(point) {
+            animateTrackClick(to: value(at: point))
+            return
+        }
         super.mouseDown(with: event)
         isTrackingValue = false
+    }
+
+    /// SwiftUI's sliders glide their knob from its current position when the track is clicked.
+    /// NSSlider's cell-level tracking is globally adjusted elsewhere in the app, so reproduce that
+    /// visual behavior here while publishing the destination value only once.
+    private func animateTrackClick(to target: Double) {
+        onTrackClick?(target)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            animator().doubleValue = target
+        } completionHandler: { [weak self] in
+            self?.isTrackingValue = false
+        }
+    }
+
+    func value(at point: NSPoint) -> Double {
+        guard let cell = cell as? NSSliderCell else { return doubleValue }
+        let knob = cell.knobRect(flipped: isFlipped)
+        let track = cell.trackRect.isEmpty ? bounds : cell.trackRect
+        let travel = track.width - knob.width
+        guard travel > 0 else { return doubleValue }
+        var fraction = min(1, max(0, (point.x - track.minX - knob.width / 2) / travel))
+        if userInterfaceLayoutDirection == .rightToLeft { fraction = 1 - fraction }
+        return minValue + Double(fraction) * (maxValue - minValue)
     }
 
     /// The drawn knob, or the cell's knob rectangle when the slider has not built a knob view yet.

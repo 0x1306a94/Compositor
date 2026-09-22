@@ -48,4 +48,16 @@ struct CameraRawSliderTests {
         #expect(slider.isOnKnob(NSPoint(x: knob.midX, y: knob.midY)))
         #expect(!slider.isOnKnob(NSPoint(x: 2, y: knob.midY)))
     }
+
+    @Test func trackClickValueMatchesTheClickedPosition() {
+        let slider = CameraRawSliderView(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        slider.minValue = -100
+        slider.maxValue = 100
+        let left = slider.value(at: NSPoint(x: 0, y: slider.bounds.midY))
+        let center = slider.value(at: NSPoint(x: slider.bounds.midX, y: slider.bounds.midY))
+        let right = slider.value(at: NSPoint(x: slider.bounds.maxX, y: slider.bounds.midY))
+        #expect(left == -100)
+        #expect(abs(center) < 1)
+        #expect(right == 100)
+    }
 }
