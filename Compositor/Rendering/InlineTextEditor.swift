@@ -28,6 +28,8 @@ final class CanvasTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+        // Text views hide the pointer while typing; on the canvas it stays, so you can see where you'll click next.
+        NSCursor.setHiddenUntilMouseMoves(false)
     }
     override func paste(_ sender: Any?) { pasteAsPlainText(sender) }
     // The editor sets the cursor for the whole box — the I-beam over the text, resize arrows over the edges.
