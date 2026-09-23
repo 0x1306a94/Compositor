@@ -31,7 +31,7 @@ nonisolated enum PSDText {
         return "The font “\(name)” isn’t installed, so the text was drawn with the system font."
     }
 
-    static func parse(extra: [String: Data], resolution: Double) -> Source? {
+    static func parse(extra: [String: Data]) -> Source? {
         guard let data = extra["TySh"] ?? extra["tySh"], data.count <= 8_000_000 else { return nil }
         var reader = Reader(data: data)
         guard reader.u16() == 1 else { return nil }
@@ -40,7 +40,7 @@ nonisolated enum PSDText {
               [xx, xy, yx, yy, tx, ty].allSatisfy(\.isFinite) else { return nil }
         guard reader.u16() == 50, let text = reader.descriptor(versioned: true) else { return nil }
         if let orientation = text.enumeration("Ornt"), orientation == "Vrtc" { return nil }
-        guard let placed = placement(xx: xx, xy: xy, yx: yx, yy: yy, tx: tx, ty: ty, resolution: resolution) else { return nil }
+        guard let placed = placement(xx: xx, xy: xy, yx: yx, yy: yy, tx: tx, ty: ty) else { return nil }
 
         var notes: [String] = []
         if reader.remaining >= 2, reader.u16() == 1, let warp = reader.descriptor(versioned: true),
@@ -71,11 +71,12 @@ nonisolated enum PSDText {
             let pad = LayerTextStyle.padding
             var boxed = style
             boxed.boxSize = CGSize(width: frame.width + pad * 2, height: frame.height + pad * 2)
-            if boxed.isValid {
-                style = boxed
-                anchor = placed.map(CGPoint(x: bounds.minX, y: bounds.minY))
-                anchorIsFrame = true
-            }
+            // A paragraph frame the model cannot store is dropped entirely: importing as point
+            // text would lose the wrap without saying so. Vertical text already falls back the same way.
+            guard boxed.isValid else { return nil }
+            style = boxed
+            anchor = placed.map(CGPoint(x: bounds.minX, y: bounds.minY))
+            anchorIsFrame = true
         }
         guard style.isValid else { return nil }
         return Source(style: style, notes: notes, documentAnchor: anchor, rotation: placed.rotation,
@@ -105,8 +106,9 @@ nonisolated enum PSDText {
     }
 
     /// Uniform scale, rotation and an optional vertical flip. Shear and uneven scale return nil.
-    /// Pixel size is points × matrix scale × (document ppi / 72).
-    private static func placement(xx: Double, xy: Double, yx: Double, yy: Double, tx: Double, ty: Double, resolution: Double) -> Placement? {
+    /// Engine sizes are already in text-space units that the matrix maps into document pixels;
+    /// document PPI is print metadata and must not multiply that product again.
+    private static func placement(xx: Double, xy: Double, yx: Double, yy: Double, tx: Double, ty: Double) -> Placement? {
         let scaleX = hypot(xx, yx)
         guard scaleX > 1e-6 else { return nil }
         let cosR = xx / scaleX
@@ -117,8 +119,7 @@ nonisolated enum PSDText {
         guard scaleY > 1e-6 else { return nil }
         let largest = max(scaleX, scaleY)
         guard abs(localX) <= 0.02 * largest, abs(scaleX - scaleY) <= 0.02 * largest else { return nil }
-        let dpi = (resolution.isFinite && resolution >= 1 ? resolution : 72) / 72
-        let pixelScale = scaleX * dpi
+        let pixelScale = scaleX
         guard pixelScale.isFinite, pixelScale > 0 else { return nil }
         let ySign = localY < 0 ? -1.0 : 1.0
         let exx = cosR * pixelScale
@@ -181,6 +182,10 @@ nonisolated enum PSDText {
         var font = 0.0
         var size = 0.0
         var tracking = 0.0
+        var leading = 0.0
+        var autoLeading = true
+        var horizontalScale = 1.0
+        var verticalScale = 1.0
         var bold = false
         var italic = false
         var red = 0.0
@@ -194,6 +199,10 @@ nonisolated enum PSDText {
         sign.font = number(walk(data, "Font")) ?? 0
         sign.size = number(walk(data, "FontSize")) ?? 0
         sign.tracking = number(walk(data, "Tracking")) ?? 0
+        sign.autoLeading = bool(walk(data, "AutoLeading")) ?? true
+        sign.leading = number(walk(data, "Leading")) ?? 0
+        sign.horizontalScale = number(walk(data, "HorizontalScale")) ?? 1
+        sign.verticalScale = number(walk(data, "VerticalScale")) ?? 1
         sign.bold = bool(walk(data, "FauxBold")) ?? false
         sign.italic = bool(walk(data, "FauxItalic")) ?? false
         let channels = array(walk(data, "FillColor", "Values")).compactMap { number($0) }

@@ -579,7 +579,7 @@ struct PSDRoundTripTests {
     }
 
     @Test func photoshopPointTextImportsAsEditableText() throws {
-        let parsed = try #require(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", tx: 40, ty: 50)], resolution: 72))
+        let parsed = try #require(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", tx: 40, ty: 50)]))
         #expect(parsed.style.content == "Hello")
         #expect(parsed.style.fontName == "Helvetica")
         #expect(parsed.style.fontSize == 24)
@@ -611,13 +611,16 @@ struct PSDRoundTripTests {
         #expect(abs(layer.transform.origin.y - 50) < 80)
     }
 
-    @Test func photoshopTextSizeFollowsDocumentResolution() {
-        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello")], resolution: 144)
-        #expect(parsed?.style.fontSize == 48)
+    @Test func photoshopTextSizeUsesMatrixScaleNotDocumentResolution() {
+        // Identity scale keeps the engine size whether the document is 72 or 300 PPI.
+        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello")])?.style.fontSize == 24)
+        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", xx: 2, yy: 2)])?.style.fontSize == 48)
+        // Non-1 scale and a non-72 document resolution still multiply by the matrix only.
+        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", fontSize: 25, xx: 2, yy: 2)])?.style.fontSize == 50)
     }
 
     @Test func photoshopTextKeepsTheFirstStyleAndReportsTheRest() {
-        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", red: 1, green: 0, blue: 0, justification: 2, tracking: 1000, leading: 30, secondSize: 48)], resolution: 72)
+        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", red: 1, green: 0, blue: 0, justification: 2, tracking: 1000, leading: 30, secondSize: 48)])
         #expect(parsed?.style.content == "Hello")
         #expect(parsed?.style.alignment == .center)
         #expect(parsed?.style.tracking == 24)
@@ -627,25 +630,49 @@ struct PSDRoundTripTests {
         #expect(parsed?.notes.contains(PSDText.firstStyleNote) == true)
     }
 
+    @Test func photoshopTextReportsLeadingOnlyStyleDifferences() {
+        let byLeading = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", leading: 30, secondLeading: 48)])
+        #expect(byLeading?.style.leading == 30)
+        #expect(byLeading?.notes.contains(PSDText.firstStyleNote) == true)
+        let byScale = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", secondHorizontalScale: 1.2)])
+        #expect(byScale?.notes.contains(PSDText.firstStyleNote) == true)
+    }
+
     @Test func photoshopParagraphTextKeepsItsBox() {
-        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", tx: 10, ty: 30, bounds: (0, 0, 200, 80), glyphBounds: (0, -10, 40, 10))], resolution: 72)
+        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", tx: 10, ty: 30, bounds: (0, 0, 200, 80), glyphBounds: (0, -10, 40, 10))])
         #expect(parsed?.anchorIsFrame == true)
         #expect(parsed?.style.boxSize?.width == 224)
         #expect(parsed?.style.boxSize?.height == 104)
         #expect(parsed?.documentAnchor == CGPoint(x: 10, y: 30))
     }
 
+    @Test func oversizedPhotoshopParagraphFrameStaysPixels() throws {
+        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", bounds: (0, 0, 40_000, 100), glyphBounds: (0, 0, 40, 10))]) == nil)
+        let image = try colorImage(width: 4, height: 4, red: 0, green: 1, blue: 0)
+        var record = PSDRecord(id: UUID(), parentID: nil, name: "Billboard")
+        record.image = image
+        record.bounds = CGRect(x: 0, y: 0, width: 4, height: 4)
+        let file = try PSDFixture.data(PSDDocument(width: 16, height: 16, resolution: 72, layers: [record]),
+                                       composite: try colorImage(width: 16, height: 16, red: 1, green: 1, blue: 1),
+                                       extras: [record.id: ["TySh": PSDFixture.tySh(text: "Hello", bounds: (0, 0, 40_000, 100), glyphBounds: (0, 0, 40, 10))]])
+        let imported = try PSDDocumentBuilder.makeImport(try PSDReader.read(file))
+        let layer = try #require(imported.layers.first)
+        #expect(layer.liveText == nil)
+        #expect(layer.asset?.image.width == 4)
+        #expect(imported.conversions.contains { $0.message == PSDText.rasterizedNote })
+    }
+
     @Test func warpedPhotoshopTextStaysEditableAndSaysSo() {
-        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", fauxBold: true, warp: true)], resolution: 72)
+        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", fauxBold: true, warp: true)])
         #expect(parsed?.style.content == "Hello")
         #expect(parsed?.notes.contains(PSDText.warpNote) == true)
         #expect(parsed?.notes.contains(PSDText.fauxNote) == true)
     }
 
     @Test func verticalOrBrokenPhotoshopTextStaysPixels() throws {
-        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", vertical: true)], resolution: 72) == nil)
-        #expect(PSDText.parse(extra: ["TySh": Data([0, 1])], resolution: 72) == nil)
-        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", xx: 2, yy: 1)], resolution: 72) == nil)
+        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", vertical: true)]) == nil)
+        #expect(PSDText.parse(extra: ["TySh": Data([0, 1])]) == nil)
+        #expect(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", xx: 2, yy: 1)]) == nil)
 
         let image = try colorImage(width: 4, height: 4, red: 0, green: 0, blue: 1)
         var record = PSDRecord(id: UUID(), parentID: nil, name: "Sideways")
@@ -662,7 +689,7 @@ struct PSDRoundTripTests {
     }
 
     @Test func missingPhotoshopFontIsReportedButStaysEditable() throws {
-        let parsed = try #require(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", font: "DefinitelyMissingFontXYZ")], resolution: 72))
+        let parsed = try #require(PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", font: "DefinitelyMissingFontXYZ")]))
         let recordText = parsed
         var record = PSDRecord(id: UUID(), parentID: nil, name: "Missing")
         record.kind = .text
@@ -674,7 +701,7 @@ struct PSDRoundTripTests {
     }
 
     @Test func rotatedPhotoshopTextKeepsItsAngle() {
-        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", xx: 0, xy: -1, yx: 1, yy: 0)], resolution: 72)
+        let parsed = PSDText.parse(extra: ["TySh": PSDFixture.tySh(text: "Hello", xx: 0, xy: -1, yx: 1, yy: 0)])
         #expect(abs((parsed?.rotation ?? 0) - 90) < 0.01)
         #expect(parsed?.flipY == false)
     }
