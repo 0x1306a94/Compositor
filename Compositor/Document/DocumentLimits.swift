@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// The size and memory ceilings a document is held to, in one place.
 ///
@@ -20,8 +21,8 @@ nonisolated enum DocumentLimits {
     static let maxSideExtent = CGFloat(maxSide)
 
     /// Largest single surface: a canvas, an export, a filter target, an adjustment or mask render.
-    /// At RGBA8 this caps one allocation at roughly 2 GB.
-    static let maxSurfacePixels = 512_000_000
+    /// At RGBA8 one allocation is at most 800 MB, and a filter holds a few of them at once.
+    static let maxSurfacePixels = 200_000_000
 
     /// `maxSurfacePixels` for the paths that measure in CGFloat.
     static let maxSurfaceExtent = CGFloat(maxSurfacePixels)
@@ -29,7 +30,11 @@ nonisolated enum DocumentLimits {
     /// Total imported raster one document may hold, summed across every layer and mask. Only
     /// documents that genuinely contain this much ever reach it, so the ceiling costs nothing to
     /// the small documents that never approach it.
-    static let documentPixelBudget = 800_000_000
+    ///
+    /// Scaled to the Mac: a quarter of its memory at 4 bytes a pixel (about 537 MP on 8 GB), never less than
+    /// one surface and never more than 800 MP (3.2 GB of layers), which a 16 GB Mac already reaches.
+    static let documentPixelBudget = min(800_000_000,
+        max(maxSurfacePixels, Int(clamping: ProcessInfo.processInfo.physicalMemory / 16)))
 
     /// The two ceilings as megapixels, for the messages that quote them back to the reader.
     static var maxSurfaceMegapixels: Int { maxSurfacePixels / 1_000_000 }
