@@ -347,13 +347,19 @@ struct NativeLayerList: NSViewRepresentable {
             guard session.canEditLayers, rows.indices.contains(table.clickedRow) else { return }
             let id = rows[table.clickedRow].id
             session.activeLayerID = id
-            // On the thumbnail (or another of the row's controls) a double-click opens what the layer holds: its
-            // text, or an adjustment's settings. On the name it renames the layer, as it does for every other layer.
+            // Text layers: any double-click edits the wording. Rename stays on the row's menu.
+            if rows[table.clickedRow].liveText != nil {
+                session.editActiveText()
+                return
+            }
+            // On the thumbnail (or another of the row's controls) a double-click opens an
+            // adjustment's settings. On the name it renames the layer.
             let point = NSApp.currentEvent?.locationInWindow ?? .zero
             let cell = table.view(atColumn: 0, row: table.clickedRow, makeIfNecessary: false) as? LayerCell
-            if cell?.isOnControl(point) == true {
-                if rows[table.clickedRow].liveText != nil { session.editActiveText(); return }
-                if rows[table.clickedRow].adjustment?.kind.isEditable == true { session.adjustmentEditingID = id; return }
+            if cell?.isOnControl(point) == true,
+               rows[table.clickedRow].adjustment?.kind.isEditable == true {
+                session.adjustmentEditingID = id
+                return
             }
             session.renamingLayerID = id
         }
@@ -918,7 +924,7 @@ private final class LayerCell: NSTableCellView, NSTextFieldDelegate {
         // A reused cell must not carry another row's half-finished rename.
         if renaming, layerID != layer.id { restoreLabel() }
         if !renaming { nameLabel.stringValue = (layer.maskSourceID == nil ? "" : "↳ ") + layer.name }
-        dimensions.stringValue = layer.liveText != nil ? "Text" : layer.adjustment != nil ? "Adjustment · Double-click to edit" : layer.isGroup ? "Folder" : "\(Int(layer.size.width.rounded())) × \(Int(layer.size.height.rounded())) px"
+        dimensions.stringValue = layer.liveText != nil ? "Text · Double-click to edit" : layer.adjustment != nil ? "Adjustment · Double-click to edit" : layer.isGroup ? "Folder" : "\(Int(layer.size.width.rounded())) × \(Int(layer.size.height.rounded())) px"
         if let source = layer.maskSourceID {
             let sourceName = session.document?.layers.first(where: { $0.id == source })?.name ?? "Missing source"
             dimensions.stringValue = "Clipped to \(sourceName)"
