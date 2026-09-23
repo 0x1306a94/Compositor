@@ -54,7 +54,7 @@ nonisolated struct FilterSettings: Equatable, Sendable {
     var vignetteAmount: Double = 35
     var vignetteColor = AdjustmentColor(red: 0, green: 0, blue: 0)
     var vignetteMidpoint: Double = 50
-    var vignetteRoundness: Double = 0
+    var vignetteRoundness: Double = 100
     var vignetteFeather: Double = 60
     var vignetteHighlights: Double = 25
     /// Bloom / Glow: strength and blur radius in layer pixels.
@@ -96,7 +96,7 @@ nonisolated struct FilterSettings: Equatable, Sendable {
         result.vignetteAmount = clamp(vignetteAmount, 0...100, 35)
         result.vignetteColor = vignetteColor.clamped
         result.vignetteMidpoint = clamp(vignetteMidpoint, 0...100, 50)
-        result.vignetteRoundness = clamp(vignetteRoundness, -100...100, 0)
+        result.vignetteRoundness = clamp(vignetteRoundness, -100...100, 100)
         result.vignetteFeather = clamp(vignetteFeather, 0...100, 60)
         result.vignetteHighlights = clamp(vignetteHighlights, 0...100, 25)
         result.bloomAmount = clamp(bloomAmount, 0...100, 40)
@@ -128,6 +128,9 @@ nonisolated struct FilterJob: @unchecked Sendable {
     let mapping: CGAffineTransform
     /// Add Noise's random pattern: the same seed gives the same grain.
     var seed: UInt32 = 0
+    /// Vignette on an empty layer: the canvas, in the document, which it frames and fills. Otherwise the vignette
+    /// frames the layer's own pixels and recolors only those.
+    var canvas: CGRect? = nil
     /// Canvas-space origin used by live adjustment layers so partial redraws keep one noise field.
     var noiseOrigin: CGPoint = .zero
     /// Camera Raw's Option-drag clipping view. Preview only; committing leaves this nil.
@@ -217,7 +220,10 @@ nonisolated enum PixelFilter {
             let context = try BrushRaster.context(width: width, height: height, mask: false)
             BrushRaster.draw(job.image, in: extent, mask: false, context: context)
             guard let data = context.data else { throw ExportError.render }
+            // The canvas in this image's pixels; bottom-up, as the context's rows are.
+            let frame = job.canvas.map { $0.applying(job.mapping.inverted()) } ?? extent
             adjust_colored_vignette(data.assumingMemoryBound(to: UInt8.self), width, height, context.bytesPerRow,
+                                    frame.minX, CGFloat(height) - frame.maxY, frame.width, frame.height, job.canvas == nil ? 0 : 1,
                                     settings.vignetteAmount, settings.vignetteMidpoint, settings.vignetteRoundness,
                                     settings.vignetteFeather, settings.vignetteHighlights,
                                     settings.vignetteColor.red, settings.vignetteColor.green, settings.vignetteColor.blue)
@@ -330,6 +336,10 @@ final class FilterEdit {
     var cameraRawScope: CameraRawScope?
     /// RGB of the pixel under the pointer, in the adjusted preview.
     var cameraRawReadout: (red: Int, green: Int, blue: Int)?
+    /// Vignette on an empty layer: the canvas it frames and fills.
+    @ObservationIgnored var canvas: CGRect?
+    /// The layer had no pixels yet (an empty layer); the filter started it from clear ones.
+    @ObservationIgnored var startedEmpty = false
     @ObservationIgnored var preparedPreview: CGImage?
     /// Reject a render started before the blur's padded pixel grid changed.
     @ObservationIgnored var previewSourceVersion: UInt64 = 0
@@ -443,6 +453,7 @@ final class FilterEdit {
     var previewJob: FilterJob {
         var job = FilterJob(kind: kind, image: previewSource, settings: renderSettings(), scale: previewScale, selection: selection,
                             mapping: previewMapping, seed: seed)
+        job.canvas = canvas
         job.cameraRawClipping = cameraRawClipping
         job.showsShadowClipping = showsShadowClipping
         job.showsHighlightClipping = showsHighlightClipping
@@ -458,24 +469,36 @@ extension EditorSession {
     }
     func beginFilter(_ kind: FilterKind) {
         if kind == .contentAwareFill && !canContentAwareFill { return }
-        guard filterEdit == nil, hueSaturation == nil, canAdjustColors else { NSSound.beep(); return }
+        guard filterEdit == nil, hueSaturation == nil, kind == .vignette ? canVignette : canAdjustColors else { NSSound.beep(); return }
         if gradientEdit != nil {
             Task { await commitGradient(); beginFilter(kind) }
             return
         }
         commitTransform(); cancelCrop(); cancelLasso()
-        guard let layer = activeLayer, let document else { return }
+        guard var layer = activeLayer, let document else { return }
         do {
+            // An empty layer has no pixels until something is put on it; Vignette starts it with clear ones.
+            let startedEmpty = layer.asset == nil
+            if startedEmpty {
+                let width = max(1, Int(layer.transform.size.width.rounded())), height = max(1, Int(layer.transform.size.height.rounded()))
+                guard let clear = try BrushRaster.context(width: width, height: height, mask: false).makeImage() else { throw ExportError.render }
+                layer.asset = ImportedImage(image: clear, thumbnail: try PixelAdjust.thumbnail(of: clear), name: layer.name)
+            }
             var settings = filterSettings
             // Gradient Map starts from the foreground and background colors, as in Photoshop.
             if kind == .gradientMap {
                 settings.gradientMap = GradientMapSettings(shadows: AdjustmentColor(foregroundColor), highlights: AdjustmentColor(backgroundColor))
             }
-            // Content-Aware Fill extends the layer over any of the selection on the canvas past its edge.
+            // Content-Aware Fill extends the layer over any of the selection on the canvas past its edge; Vignette on
+            // an empty layer covers the whole canvas, which it frames and fills.
+            let canvas = CGRect(origin: .zero, size: document.size)
+            let fillsCanvas = kind == .vignette && startedEmpty
             let area = kind == .contentAwareFill
-                ? selection.map { $0.path.boundingBoxOfPath.intersection(CGRect(origin: .zero, size: document.size)) }.flatMap { $0.isNull || $0.isEmpty ? nil : $0 }
-                : nil
+                ? selection.map { $0.path.boundingBoxOfPath.intersection(canvas) }.flatMap { $0.isNull || $0.isEmpty ? nil : $0 }
+                : fillsCanvas ? canvas : nil
             let edit = try FilterEdit(kind: kind, layer: layer, selection: selection?.clip(canvas: document.size), settings: settings, growingTo: area)
+            if fillsCanvas { edit.canvas = canvas }
+            edit.startedEmpty = startedEmpty
             filterEdit = edit
             updateFilter(edit.settings, preview: true)
         } catch { brushError = error.localizedDescription }
@@ -577,8 +600,9 @@ extension EditorSession {
         // Remove Background masks the background out rather than erasing it, so it can be brought back at any time
         // by painting the mask, disabling it, or deleting it.
         if edit.kind == .removeBackground { await commitBackgroundMask(edit); return }
-        let job = FilterJob(kind: edit.kind, image: edit.grownImage ?? edit.original.image, settings: edit.renderSettings(), scale: 1,
+        var job = FilterJob(kind: edit.kind, image: edit.grownImage ?? edit.original.image, settings: edit.renderSettings(), scale: 1,
                             selection: edit.selection, mapping: edit.mapping, seed: edit.seed)
+        job.canvas = edit.canvas
         let cached = edit.kind.isAutomatic && edit.preparedSettings == edit.settings ? edit.preparedPreview : nil
         do {
             let grown = edit.grownTransform
@@ -595,7 +619,8 @@ extension EditorSession {
             }.value
             let asset = made.asset
             guard let index = document?.layers.firstIndex(where: { $0.id == edit.layerID }),
-                  let current = document?.layers[index], current.asset?.image === edit.original.image,
+                  let current = document?.layers[index],
+                  current.asset?.image === edit.original.image || (edit.startedEmpty && current.asset == nil),
                   current.transform == edit.transform else { return }
             // A grown layer's mask (covering the old grid) is carried onto the new one, its edge tone past the old edge.
             var mask = current.mask
