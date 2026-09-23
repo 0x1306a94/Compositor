@@ -52,6 +52,8 @@ nonisolated struct PSDRecord: @unchecked Sendable {
     var kind = PSDLayerKind.raster
     var shape: LayerShapeStyle?
     var shapeNotes: [String] = []
+    /// Parsed Photoshop type, when the `TySh` block maps onto an editable text layer.
+    var text: PSDText.Source?
 }
 
 nonisolated enum PSDLayerKind: Equatable, Sendable {

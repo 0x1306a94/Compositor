@@ -4,7 +4,7 @@ import Foundation
 
 /// Builds tiny Photoshop files for reader tests. Not part of the app; Compositor does not write PSD.
 nonisolated enum PSDFixture {
-    static func data(_ document: PSDDocument, composite: CGImage) throws -> Data {
+    static func data(_ document: PSDDocument, composite: CGImage, extras: [UUID: [String: Data]] = [:]) throws -> Data {
         let width = document.width, height = document.height
         guard (1...30_000).contains(width), (1...30_000).contains(height) else { throw ImageImportError.tooLarge }
         var file = PSDBuffer()
@@ -20,7 +20,7 @@ nonisolated enum PSDFixture {
         let resources = resolutionResource(document.resolution)
         file.u32(UInt32(resources.count))
         file.bytes(resources)
-        let layers = try layerSection(document)
+        let layers = try layerSection(document, extras: extras)
         file.u32(UInt32(layers.count))
         file.bytes(layers)
         try appendComposite(&file, composite, width: width, height: height)
@@ -33,9 +33,10 @@ nonisolated enum PSDFixture {
         var channels: [(id: Int16, payload: Data)]
         var top = 0, left = 0, bottom = 0, right = 0
         var maskTop = 0, maskLeft = 0, maskBottom = 0, maskRight = 0
+        var extras: [String: Data] = [:]
     }
 
-    private static func layerSection(_ document: PSDDocument) throws -> Data {
+    private static func layerSection(_ document: PSDDocument, extras: [UUID: [String: Data]]) throws -> Data {
         var prepared: [Prepared] = []
         func emit(_ parent: UUID?) throws {
             // File order is bottom-to-top. Photoshop groups are type 3, children, then type 1/2.
@@ -46,7 +47,7 @@ nonisolated enum PSDFixture {
                     prepared.append(try emptyLayer(name: record.name, blendKey: record.blendKey == "pass" ? "pass" : record.blendKey,
                                                    section: 1, visible: record.isVisible, opacity: record.opacity, parent: record.parentID, id: record.id, mask: record.mask, maskEnabled: record.maskEnabled))
                 } else {
-                    prepared.append(try layer(record))
+                    prepared.append(try layer(record, extras: extras[record.id] ?? [:]))
                 }
             }
         }
@@ -75,7 +76,7 @@ nonisolated enum PSDFixture {
         return section.data
     }
 
-    private static func layer(_ record: PSDRecord) throws -> Prepared {
+    private static func layer(_ record: PSDRecord, extras: [String: Data] = [:]) throws -> Prepared {
         let image = record.image
         let width = image?.width ?? 0
         let height = image?.height ?? 0
@@ -97,7 +98,8 @@ nonisolated enum PSDFixture {
         return Prepared(record: record, isDivider: false, channels: channels,
                         top: top, left: left, bottom: top + height, right: left + width,
                         maskTop: top, maskLeft: left,
-                        maskBottom: top + (record.mask?.height ?? 0), maskRight: left + (record.mask?.width ?? 0))
+                        maskBottom: top + (record.mask?.height ?? 0), maskRight: left + (record.mask?.width ?? 0),
+                        extras: extras)
     }
 
     private static func emptyLayer(name: String, blendKey: String, section: Int, visible: Bool = true, opacity: Double = 1, parent: UUID?, id: UUID? = nil, mask: CGImage? = nil, maskEnabled: Bool = true) throws -> Prepared {
@@ -150,12 +152,12 @@ nonisolated enum PSDFixture {
         buffer.u8(record.clipping ? 1 : 0)
         buffer.u8(record.isVisible ? 0 : 2)
         buffer.u8(0)
-        let extra = extraData(item)
+        let extra = extraData(item, extras: item.extras)
         buffer.u32(UInt32(extra.count))
         buffer.bytes(extra)
     }
 
-    private static func extraData(_ item: Prepared) -> Data {
+    private static func extraData(_ item: Prepared, extras: [String: Data]) -> Data {
         var extra = PSDBuffer()
         if item.record.mask != nil, item.maskRight > item.maskLeft, item.maskBottom > item.maskTop {
             extra.u32(20)
@@ -187,6 +189,9 @@ nonisolated enum PSDFixture {
             payload.append(contentsOf: Array(blend.prefix(4).utf8))
             writeAdditional(&extra, key: "lsct", payload: payload)
         }
+        for key in extras.keys.sorted() {
+            if let payload = extras[key] { writeAdditional(&extra, key: key, payload: payload) }
+        }
         return extra.data
     }
 
@@ -208,6 +213,154 @@ nonisolated enum PSDFixture {
             data.append(UInt8(truncatingIfNeeded: unit))
         }
         return data
+    }
+
+    /// A Photoshop 6 `TySh` block. The descriptor layout matches Adobe’s type-tool object setting.
+    static func tySh(text: String, font: String = "Helvetica", fontSize: Double = 24,
+                     red: Double = 0, green: Double = 0, blue: Double = 0,
+                     justification: Int = 0, tracking: Double = 0, leading: Double? = nil,
+                     fauxBold: Bool = false, fauxItalic: Bool = false, vertical: Bool = false, warp: Bool = false,
+                     secondSize: Double? = nil, tx: Double = 40, ty: Double = 50,
+                     xx: Double = 1, xy: Double = 0, yx: Double = 0, yy: Double = 1,
+                     bounds: (CGFloat, CGFloat, CGFloat, CGFloat)? = nil,
+                     glyphBounds: (CGFloat, CGFloat, CGFloat, CGFloat)? = nil) -> Data {
+        var block = PSDBuffer()
+        block.u16(1)
+        for value in [xx, xy, yx, yy, tx, ty] { block.f64(value) }
+        block.u16(50)
+        var items: [(String, Data)] = [
+            ("Txt ", textItem(text)),
+            ("Ornt", enumItem(type: "Ornt", value: vertical ? "Vrtc" : "Hrzn"))
+        ]
+        if let bounds {
+            items.append(("bounds", rectItem(bounds)))
+        }
+        if let glyphBounds {
+            items.append(("boundingBox", rectItem(glyphBounds)))
+        }
+        items.append(("EngineData", rawItem(Data(engine(text: text, font: font, fontSize: fontSize, red: red, green: green, blue: blue, justification: justification, tracking: tracking, leading: leading, fauxBold: fauxBold, fauxItalic: fauxItalic, secondSize: secondSize).utf8))))
+        block.descriptor(classID: "TxLr", items: items)
+        block.u16(1)
+        block.descriptor(classID: "warp", items: [("warpStyle", enumItem(type: "warpStyle", value: warp ? "warpArc" : "warpNone"))])
+        return block.data
+    }
+
+    private static func engine(text: String, font: String, fontSize: Double, red: Double, green: Double, blue: Double, justification: Int, tracking: Double, leading: Double?, fauxBold: Bool, fauxItalic: Bool, secondSize: Double?) -> String {
+        let run = { (size: Double) in """
+<<
+/StyleSheet
+<<
+/StyleSheetData
+<<
+/Font 0
+/FontSize \(size)
+/FauxBold \(fauxBold)
+/FauxItalic \(fauxItalic)
+/AutoLeading \(leading == nil)
+/Leading \(leading ?? size * 1.2)
+/Tracking \(tracking)
+/FillColor
+<<
+/Type 1
+/Values [ 1.0 \(red) \(green) \(blue) ]
+>>
+>>
+>>
+>>
+""" }
+        let runs = secondSize == nil ? run(fontSize) : "\(run(fontSize))\n\(run(secondSize ?? fontSize))"
+        return """
+<<
+/EngineDict
+<<
+/Editor
+<<
+/Text \(parenthesized(text))
+>>
+/ParagraphRun
+<<
+/RunArray
+[
+<<
+/ParagraphSheet
+<<
+/Properties
+<<
+/Justification \(justification)
+>>
+>>
+>>
+]
+>>
+/StyleRun
+<<
+/RunArray
+[
+\(runs)
+]
+>>
+>>
+/ResourceDict
+<<
+/FontSet
+[
+<<
+/Name \(parenthesized(font))
+>>
+]
+>>
+>>
+"""
+    }
+
+    private static func parenthesized(_ text: String) -> String {
+        var encoded = "("
+        for byte in text.utf8 {
+            if byte == UInt8(ascii: "\\") || byte == UInt8(ascii: "(") || byte == UInt8(ascii: ")") {
+                encoded.append("\\")
+            }
+            encoded.append(Character(UnicodeScalar(byte)))
+        }
+        encoded.append(")")
+        return encoded
+    }
+
+    private static func textItem(_ text: String) -> Data {
+        var item = PSDBuffer()
+        item.string("TEXT")
+        item.utf16(text)
+        return item.data
+    }
+
+    private static func enumItem(type: String, value: String) -> Data {
+        var item = PSDBuffer()
+        item.string("enum")
+        item.id(type)
+        item.id(value)
+        return item.data
+    }
+
+    private static func rawItem(_ payload: Data) -> Data {
+        var item = PSDBuffer()
+        item.string("tdta")
+        item.u32(UInt32(payload.count))
+        item.bytes(payload)
+        return item.data
+    }
+
+    private static func rectItem(_ box: (CGFloat, CGFloat, CGFloat, CGFloat)) -> Data {
+        var item = PSDBuffer()
+        item.string("Objc")
+        item.u32(0)
+        item.id("Rctn")
+        item.u32(4)
+        for (key, value) in [("Left", box.0), ("Top ", box.1), ("Rght", box.2), ("Btom", box.3)] {
+            item.id(key)
+            item.string("UntF")
+            item.string("#Pnt")
+            item.f64(Double(value))
+        }
+        return item.data
     }
 
     private static func resolutionResource(_ resolution: Double) -> Data {
@@ -337,8 +490,37 @@ nonisolated private struct PSDBuffer: Sendable {
     mutating func i16(_ value: Int16) { u16(UInt16(bitPattern: value)) }
     mutating func u32(_ value: UInt32) { data.appendUInt32(value) }
     mutating func i32(_ value: Int32) { u32(UInt32(bitPattern: value)) }
+    mutating func f64(_ value: Double) {
+        var bits = value.bitPattern.bigEndian
+        withUnsafeBytes(of: &bits) { data.append(contentsOf: $0) }
+    }
     mutating func bytes(_ value: Data) { data.append(value) }
     mutating func string(_ value: String) { data.append(contentsOf: Array(value.utf8)) }
+    mutating func utf16(_ value: String) {
+        let units = Array(value.utf16)
+        u32(UInt32(units.count))
+        for unit in units { u16(unit) }
+    }
+    mutating func id(_ value: String) {
+        let bytes = Array(value.utf8)
+        if bytes.count == 4 {
+            u32(0)
+            data.append(contentsOf: bytes)
+        } else {
+            u32(UInt32(bytes.count))
+            data.append(contentsOf: bytes)
+        }
+    }
+    mutating func descriptor(classID: String, items: [(String, Data)]) {
+        u32(16)
+        u32(0)
+        id(classID)
+        u32(UInt32(items.count))
+        for (key, value) in items {
+            id(key)
+            bytes(value)
+        }
+    }
 }
 
 extension Data {
