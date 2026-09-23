@@ -346,7 +346,14 @@ final class EditorSession {
         if value.isBrushTool { _ = MetalBrushCoverage.shared }
         if value == .crop, cropRect == nil, let document {
             cropRatioChoice = "Free"
-            cropRect = CGRect(origin: .zero, size: document.size)
+            let canvas = CGRect(origin: .zero, size: document.size)
+            // With a selection, the crop starts at its bounds, as Photoshop's does: C, then Return, crops to it.
+            if let selection, !selection.isEmpty {
+                let bounds = selection.path.boundingBoxOfPath.integral.intersection(canvas)
+                cropRect = CropGeometry.valid(bounds) ? bounds : canvas
+            } else {
+                cropRect = canvas
+            }
         }
     }
     /// Tab steps the current tool through its own modes — the setting sitting at the left of its tool bar. Tools
