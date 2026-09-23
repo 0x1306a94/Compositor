@@ -156,7 +156,7 @@ struct CompositorApp: App {
                         .configuredKeyboardShortcut("x")
                     Button("Copy") {
                         if NSApp.keyWindow?.firstResponder is NSTextView { NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil) }
-                        else if session.canCopyPixels { session.copySelection() }
+                        else if session.canCopyPixels || session.canCopyLayer { session.copySelection() }
                         else { NSSound.beep() }
                     }
                         .configuredKeyboardShortcut("c")
@@ -164,6 +164,7 @@ struct CompositorApp: App {
                         .configuredKeyboardShortcut("c", modifiers: [.command, .shift]).disabled(!session.canCopyMerged)
                     Button("Paste") {
                         if NSApp.keyWindow?.firstResponder is NSTextView { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }
+                        else if applicationDelegate.workspace.pasteCopiedLayer() { }
                         else if session.canPaste { session.paste() }
                         else { NSSound.beep() }
                     }
