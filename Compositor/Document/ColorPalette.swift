@@ -82,15 +82,16 @@ extension EditorSession {
             case .palette(let background):
                 if commit, !isMaskSelected { setPaletteColor(colorPicker.color, background: background) }
             case .text(let draftID):
-                if commit, tool == .type, textDraft?.id == draftID {
-                    let color = colorPicker.color
+                if tool == .type, textDraft?.id == draftID {
+                    let color = commit ? colorPicker.color : colorPicker.original
                     if draftID != nil {
                         changeTextStyle { $0.red = color.red; $0.green = color.green; $0.blue = color.blue }
-                    } else {
+                        refreshCanvasPreview?()
+                    } else if commit {
                         textDefaults.red = color.red; textDefaults.green = color.green; textDefaults.blue = color.blue
                     }
                     // The text color is the foreground color: picking one in the Type bar moves the swatch too.
-                    if !isMaskSelected { foregroundColor = color }
+                    if commit, !isMaskSelected { foregroundColor = color }
                 }
             case .effect(let kind):
                 let color = commit ? colorPicker.color : colorPicker.original
@@ -121,6 +122,14 @@ extension EditorSession {
     func previewEffectColor() {
         guard let colorPicker, case .effect(let kind) = colorPicker.target else { return }
         changeEffects { $0.setColor(colorPicker.color, for: kind) }
+    }
+    /// Preview the picker's working color in the active on-canvas text draft.
+    func previewTextColor() {
+        guard let colorPicker, case .text(let draftID) = colorPicker.target,
+              let draftID, tool == .type, textDraft?.id == draftID else { return }
+        let color = colorPicker.color
+        changeTextStyle { $0.red = color.red; $0.green = color.green; $0.blue = color.blue }
+        refreshCanvasPreview?()
     }
     /// While the picker is open on a Gradient Map end, the gradient (and canvas) follow its working color.
     func previewGradientMapColor() {
