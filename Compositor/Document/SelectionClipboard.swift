@@ -159,8 +159,10 @@ extension EditorSession {
     /// Cmd-J (Layer via Copy): the selection's pixels become a new layer in place; with no
     /// selection the whole layer is duplicated.
     func layerViaCopy() {
-        guard canEditLayers, let layer = activeLayer, !layer.isGroup, selection?.isEmpty != true else { return }
+        guard canEditLayers, let layer = activeLayer, selection?.isEmpty != true else { return }
+        // Without a selection it duplicates, folders included; with one it copies pixels, which a folder has none of.
         guard selection != nil else { duplicateActiveLayer(); return }
+        guard !layer.isGroup else { return }
         do {
             guard let copied = try renderSelectedPixels(from: layer, mask: isMaskSelected) else { NSSound.beep(); return }
             addPixelLayer(copied.image, at: copied.region.origin, name: nextLayerName(), editName: "Layer via Copy")
@@ -179,8 +181,9 @@ extension EditorSession {
         duplicateLayers(copiedLayerIDs())
     }
 
-    /// A copy of each layer (a folder with all it holds) just above it, as one undo step: Duplicate Layer, and Paste
-    /// of layers Copy took whole. The copies end up selected.
+    /// A copy of each layer (a folder with all it holds), as one undo step: Duplicate Layer, and Paste of layers Copy
+    /// took whole. One copy sits just above its original; several stack together, in their order, above the topmost
+    /// original, as Photoshop's do. The copies end up selected.
     func duplicateLayers(_ ids: [UUID], editName: String = "Duplicate Layer") {
         guard canEditLayers, !ids.isEmpty else { return }
         let active = activeLayerID
@@ -188,6 +191,19 @@ extension EditorSession {
         var copiesOf: [UUID: UUID] = [:]
         for id in ids { if let copy = insertCopy(of: id) { copiesOf[id] = copy } }
         guard !copiesOf.isEmpty else { endEdit(); return }
+        if copiesOf.count > 1, let layers = document?.layers {
+            // Panel order, top first, so layers in different folders compare as they're seen.
+            let panel = LayerHierarchy.entries(layers.map(\.hierarchyRecord), topFirst: true, collapsed: []).map(\.layer.id)
+            let originals = panel.filter { copiesOf[$0] != nil }
+            if let top = originals.first, let topLayer = layers.first(where: { $0.id == top }) {
+                let parent = topLayer.parentID
+                var below = top
+                for original in originals.reversed() {
+                    guard let copy = copiesOf[original], placeLayer(copy, in: parent, above: below) else { continue }
+                    below = copy
+                }
+            }
+        }
         activeLayerID = active.flatMap { copiesOf[$0] } ?? copiesOf[ids[0]] ?? copiesOf.values.first
         selectedLayerIDs = Set(copiesOf.values)
         endEdit()

@@ -411,15 +411,12 @@ final class EditorSession {
         let targets = (document?.layers ?? []).filter { selection.contains($0.id) && !carried.contains($0.id) }.map(\.id)
         guard !targets.isEmpty else { return }
         beginEdit(targets.count > 1 ? "Duplicate Layers" : "Duplicate Layer")
-        var copies: [UUID] = []
-        for id in targets {
-            selectLayer(id)
-            duplicateActiveLayer()
-            if let copy = activeLayerID, copy != id { copies.append(copy) }
-        }
+        // Stacked as Duplicate Layer stacks them: several together above the topmost original.
+        duplicateLayers(targets)
+        let copies = selectedLayerIDs.subtracting(selection)
         guard !copies.isEmpty else { endEdit(); selectLayers(selection, primary: primary); return }
-        transformDuplicate = (copies, selection, primary)
-        selectLayers(Set(copies), primary: copies.last)
+        transformDuplicate = (Array(copies), selection, primary)
+        selectLayers(copies, primary: activeLayerID)
         beginTransform(persistent: false)
     }
     func commitTransform() {
