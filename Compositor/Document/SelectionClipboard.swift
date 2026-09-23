@@ -11,7 +11,8 @@ struct PixelClipboard {
 /// A whole layer copied with no selection. Paste brings it back complete — folder contents, mask, effects, editable
 /// text: in this project as a copy above it, in another as dragging it onto that project's tab does.
 struct CopiedLayer {
-    let id: UUID
+    /// Top to bottom as the document lists them; a layer inside a copied folder comes with the folder, not on its own.
+    let ids: [UUID]
     /// As `PixelClipboard.changeCount`: anything copied since replaces it.
     let changeCount: Int
 }
@@ -106,13 +107,13 @@ extension EditorSession {
             pasteboard.clearContents()
             pasteboard.setString(layer.id.uuidString, forType: NSPasteboard.PasteboardType("com.compositor.copied-layer"))
             pixelClipboard = nil
-            copiedLayer = CopiedLayer(id: layer.id, changeCount: pasteboard.changeCount)
+            copiedLayer = CopiedLayer(ids: copiedLayerIDs(), changeCount: pasteboard.changeCount)
             return
         }
         do {
             guard let copied = try renderSelectedPixels(from: layer, mask: isMaskSelected) else { NSSound.beep(); return }
             store(copied)
-            if canCopyLayer { copiedLayer = CopiedLayer(id: layer.id, changeCount: NSPasteboard.general.changeCount) }
+            if canCopyLayer { copiedLayer = CopiedLayer(ids: copiedLayerIDs(), changeCount: NSPasteboard.general.changeCount) }
         } catch { brushError = error.localizedDescription }
     }
 
@@ -166,17 +167,38 @@ extension EditorSession {
         } catch { brushError = error.localizedDescription }
     }
 
-    func duplicateActiveLayer() {
-        if let activeLayerID { duplicateLayer(activeLayerID) }
+    /// The selected layers Copy takes whole, in document order, leaving out any inside a selected folder.
+    private func copiedLayerIDs() -> [UUID] {
+        let selected = selectedLayerIDs.union(activeLayerID.map { [$0] } ?? [])
+        let nested = selected.reduce(into: Set<UUID>()) { $0.formUnion(descendantIDs(of: $1)) }
+        return (document?.layers ?? []).map(\.id).filter { selected.contains($0) && !nested.contains($0) }
     }
 
-    /// A copy of the layer (a folder with all it holds) just above it: Duplicate Layer, and Paste of a layer Copy took whole.
-    func duplicateLayer(_ id: UUID, editName: String = "Duplicate Layer") {
-        guard canEditLayers, let layer = document?.layers.first(where: { $0.id == id }),
-              let index = document?.layers.firstIndex(where: { $0.id == layer.id }) else { return }
+    func duplicateActiveLayer() {
+        if let activeLayerID { duplicateLayers([activeLayerID]) }
+    }
+
+    /// A copy of each layer (a folder with all it holds) just above it, as one undo step: Duplicate Layer, and Paste
+    /// of layers Copy took whole. The copies end up selected.
+    func duplicateLayers(_ ids: [UUID], editName: String = "Duplicate Layer") {
+        guard canEditLayers, !ids.isEmpty else { return }
+        let active = activeLayerID
+        beginEdit(editName)
+        var copiesOf: [UUID: UUID] = [:]
+        for id in ids { if let copy = insertCopy(of: id) { copiesOf[id] = copy } }
+        guard !copiesOf.isEmpty else { endEdit(); return }
+        activeLayerID = active.flatMap { copiesOf[$0] } ?? copiesOf[ids[0]] ?? copiesOf.values.first
+        selectedLayerIDs = Set(copiesOf.values)
+        endEdit()
+    }
+
+    /// Inserts a copy of the layer and anything it holds just above it; returns the copy's id.
+    private func insertCopy(of id: UUID) -> UUID? {
+        guard let layer = document?.layers.first(where: { $0.id == id }),
+              let index = document?.layers.firstIndex(where: { $0.id == layer.id }) else { return nil }
         let included = descendantIDs(of: layer.id).union([layer.id])
         let originals = (document?.layers ?? []).filter { included.contains($0.id) }
-        guard (document?.layers.count ?? 0) + originals.count <= 10_000 else { return }
+        guard (document?.layers.count ?? 0) + originals.count <= 10_000 else { return nil }
         let mapping = Dictionary(uniqueKeysWithValues: originals.map { ($0.id, UUID()) })
         let copies = originals.map { original in
             ImageLayer(id: mapping[original.id]!, asset: original.asset,
@@ -186,13 +208,11 @@ extension EditorSession {
                 mask: original.mask, maskSourceID: original.maskSourceID.map { mapping[$0] ?? $0 },
                 adjustment: original.adjustment, shape: original.shape, effects: original.effects, text: original.text)
         }
-        beginEdit(editName)
         document?.layers.insert(contentsOf: copies, at: index + 1)
         for original in originals where collapsedGroupIDs.contains(original.id) {
             collapsedGroupIDs.insert(mapping[original.id]!)
         }
-        activeLayerID = mapping[layer.id]
-        endEdit()
+        return mapping[layer.id]
     }
 
     /// Option-drag in the Layers panel: a copy of the layer placed where it was dropped (inside `parent`,
