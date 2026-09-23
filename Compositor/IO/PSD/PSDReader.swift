@@ -278,7 +278,9 @@ nonisolated enum PSDReader {
                 : CGRect(x: layer.left, y: layer.top,
                          width: max(0, layer.right - layer.left), height: max(0, layer.bottom - layer.top))
             record.image = isGroup ? nil : layer.image
-            if !isGroup, let live = try PSDVector.live(extra: layer.extra, canvas: canvas, remainingPixels: remaining) {
+            if record.kind == .text, let text = PSDText.parse(extra: layer.extra) {
+                record.text = text
+            } else if !isGroup, let live = try PSDVector.live(extra: layer.extra, canvas: canvas, remainingPixels: remaining) {
                 record.image = live.image
                 record.bounds = live.bounds
                 record.shape = live.style
