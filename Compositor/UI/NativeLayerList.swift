@@ -207,13 +207,7 @@ struct NativeLayerList: NSViewRepresentable {
 
             menu.addItem(NSMenuItem.separator())
 
-            // 12. Layer Effects…
-            let effectsItem = NSMenuItem(title: "Layer Effects…", action: #selector(layerEffectsAction), keyEquivalent: "")
-            effectsItem.target = self
-            effectsItem.isEnabled = validateMenuItem(effectsItem)
-            menu.addItem(effectsItem)
-
-            // 13. Hide Layer / Show Layer
+            // 12. Hide Layer / Show Layer
             let visibilityTitle = session.activeLayer?.isVisible == false ? "Show Layer" : "Hide Layer"
             let visibilityItem = NSMenuItem(title: visibilityTitle, action: #selector(toggleVisibilityAction), keyEquivalent: "")
             visibilityItem.target = self
@@ -247,8 +241,6 @@ struct NativeLayerList: NSViewRepresentable {
                 return session.canEditMask && session.activeLayer?.mask != nil
             case #selector(toggleMaskLinkAction):
                 return session.canEditLayers && session.activeLayer?.mask != nil && session.activeLayer?.isGroup == false && session.activeLayer?.adjustment == nil
-            case #selector(layerEffectsAction):
-                return session.canEditEffects
             case #selector(toggleVisibilityAction):
                 return session.canEditLayers && session.activeLayer != nil
             default:
@@ -314,15 +306,6 @@ struct NativeLayerList: NSViewRepresentable {
 
         @objc func toggleMaskLinkAction(_ sender: Any?) {
             if let id = session.activeLayerID { session.toggleMaskLink(id) }
-        }
-
-        @objc func layerEffectsAction(_ sender: Any?) {
-            guard session.canEditEffects, let id = session.activeLayerID else { return }
-            if let kind = session.activeLayer?.effects?.kinds.first {
-                session.selectEffect(kind, on: id, editing: true)
-            } else {
-                session.addEffect(.stroke)
-            }
         }
 
         @objc func toggleVisibilityAction(_ sender: Any?) {
