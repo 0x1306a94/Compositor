@@ -167,15 +167,16 @@ extension EditorSession {
         } catch { brushError = error.localizedDescription }
     }
 
-    /// The selected layers Copy takes whole, in document order, leaving out any inside a selected folder.
+    /// The selected layers Copy and Duplicate take whole, in document order, leaving out any inside a selected folder.
     private func copiedLayerIDs() -> [UUID] {
         let selected = selectedLayerIDs.union(activeLayerID.map { [$0] } ?? [])
         let nested = selected.reduce(into: Set<UUID>()) { $0.formUnion(descendantIDs(of: $1)) }
         return (document?.layers ?? []).map(\.id).filter { selected.contains($0) && !nested.contains($0) }
     }
 
+    /// ⌘J and Duplicate Layer: every selected layer, as Photoshop does.
     func duplicateActiveLayer() {
-        if let activeLayerID { duplicateLayers([activeLayerID]) }
+        duplicateLayers(copiedLayerIDs())
     }
 
     /// A copy of each layer (a folder with all it holds) just above it, as one undo step: Duplicate Layer, and Paste
