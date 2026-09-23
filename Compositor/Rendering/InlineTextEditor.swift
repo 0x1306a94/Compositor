@@ -32,11 +32,34 @@ final class CanvasTextView: NSTextView {
     override func paste(_ sender: Any?) { pasteAsPlainText(sender) }
     // The editor sets the cursor for the whole box — the I-beam over the text, resize arrows over the edges.
     override func resetCursorRects() {}
+
+    @objc func undo(_ sender: Any? = nil) {
+        guard let undoManager, undoManager.canUndo else { return }
+        undoManager.undo()
+        didChangeText()
+    }
+
+    @objc func redo(_ sender: Any? = nil) {
+        guard let undoManager, undoManager.canRedo else { return }
+        undoManager.redo()
+        didChangeText()
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(undo(_:)) {
+            return undoManager?.canUndo ?? false
+        }
+        if item.action == #selector(redo(_:)) {
+            return undoManager?.canRedo ?? false
+        }
+        return super.validateUserInterfaceItem(item)
+    }
 }
 
 final class InlineTextEditor: NSView, NSTextViewDelegate {
     weak var canvas: CanvasView?
     let textView = CanvasTextView(frame: .zero)
+
     fileprivate var draftID: UUID?
     private var shownStyle: LayerTextStyle?
     private var synchronizing = false
