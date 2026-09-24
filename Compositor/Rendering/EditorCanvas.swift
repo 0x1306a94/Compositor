@@ -2006,7 +2006,8 @@ final class CanvasView: NSView {
         let active = session.selection?.isEmpty == false && window != nil
         if active, antsTimer == nil {
             let timer = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in
-                guard let self else { return }
+                // A redraw still pending skips this tick: a slow outline stutters rather than queuing redraws forever.
+                guard let self, !self.transformOverlay.needsDisplay else { return }
                 self.transformOverlay.antsPhase = (self.transformOverlay.antsPhase + 1).truncatingRemainder(dividingBy: 8)
                 self.transformOverlay.needsDisplay = true
             }
