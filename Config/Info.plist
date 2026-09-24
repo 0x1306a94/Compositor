@@ -20,6 +20,7 @@
 				<string>com.adobe.photoshop-image</string>
 				<string>com.adobe.photoshop-large-image</string>
 				<string>public.camera-raw-image</string>
+				<string>public.svg-image</string>
 			</array>
 		</dict>
 		<dict>
